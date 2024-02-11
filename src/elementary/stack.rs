@@ -1,5 +1,7 @@
-use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
-use std::mem::{self, MaybeUninit};
+use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
+use alloc::vec::Vec;
+use core::mem::{self, MaybeUninit};
+use core::ptr;
 
 #[derive(Debug)]
 pub struct ArrayStack<T, const N: usize> {
@@ -41,44 +43,10 @@ impl<T, const N: usize> ArrayStack<T, N> {
         mem::swap(&mut self.stack[self.i], &mut val);
         unsafe { val.assume_init() }
     }
-}
-
-#[derive(Debug)]
-pub struct VecStack<T> {
-    stack: Vec<T>,
-}
-
-impl<T> Default for VecStack<T> {
-    fn default() -> Self {
-        Self { stack: vec![] }
-    }
-}
-
-impl<T> VecStack<T> {
-    pub fn with_capacity(size: usize) -> Self {
-        Self {
-            stack: Vec::with_capacity(size),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.stack.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.stack.len()
-    }
-
-    pub fn push(&mut self, val: T) {
-        self.stack.push(val);
-    }
-
-    pub fn pop(&mut self) -> T {
-        self.stack.pop().expect("attempt to pop an empty stack")
-    }
 
     pub fn peek(&self) -> &T {
-        self.stack.last().expect("attempt to peek an empty stack")
+        let peek = self.i - 1;
+        unsafe { self.stack[peek].assume_init_ref() }
     }
 }
 
@@ -124,7 +92,7 @@ impl<T> AllocStack<T> {
     pub fn push(&mut self, val: T) {
         unsafe {
             assert!(self.top < self.base.offset(self.size));
-            std::ptr::write(self.top, val);
+            ptr::write(self.top, val);
             self.top = self.top.offset(1);
         }
     }
@@ -133,7 +101,15 @@ impl<T> AllocStack<T> {
         unsafe {
             self.top = self.top.offset(-1);
             assert!(self.top >= self.base);
-            std::ptr::read(self.top)
+            ptr::read(self.top)
+        }
+    }
+
+    pub fn peek(&self) -> &T {
+        unsafe {
+            let peek = self.top.offset(-1);
+            assert!(peek >= self.base);
+            &*peek
         }
     }
 }
@@ -141,6 +117,47 @@ impl<T> AllocStack<T> {
 impl<T> Drop for AllocStack<T> {
     fn drop(&mut self) {
         unsafe { dealloc(self.base as *mut u8, self.layout) };
+    }
+}
+
+#[derive(Debug)]
+pub struct VecStack<T> {
+    stack: Vec<T>,
+}
+
+impl<T> Default for VecStack<T> {
+    fn default() -> Self {
+        Self {
+            stack: Vec::default(),
+        }
+    }
+}
+
+impl<T> VecStack<T> {
+    pub fn with_capacity(size: usize) -> Self {
+        Self {
+            stack: Vec::with_capacity(size),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stack.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.stack.len()
+    }
+
+    pub fn push(&mut self, val: T) {
+        self.stack.push(val);
+    }
+
+    pub fn pop(&mut self) -> T {
+        self.stack.pop().expect("attempt to pop an empty stack")
+    }
+
+    pub fn peek(&self) -> &T {
+        self.stack.last().expect("attempt to peek an empty stack")
     }
 }
 
@@ -154,6 +171,7 @@ mod tests {
         stack.push(3);
         stack.push(2);
         stack.push(1);
+        assert_eq!(&1, stack.peek());
         assert_eq!(3, stack.len());
         assert_eq!(1, stack.pop());
 
@@ -191,45 +209,12 @@ mod tests {
     }
 
     #[test]
-    fn vec_stack_ok() {
-        let mut stack = VecStack::default();
-        stack.push(3);
-        stack.push(2);
-        stack.push(1);
-        assert_eq!(3, stack.len());
-        assert_eq!(1, stack.pop());
-
-        stack.pop();
-        stack.pop();
-        assert!(stack.is_empty());
-
-        let range = 4..=9;
-        for i in range.clone() {
-            stack.push(i);
-        }
-        assert_eq!(range.clone().count(), stack.len());
-        for i in range.rev() {
-            assert_eq!(i, stack.pop());
-        }
-        assert!(stack.is_empty());
-    }
-
-    #[test]
-    #[should_panic(expected = "attempt to pop an empty stack")]
-    fn vec_stack_panic_underflow() {
-        let mut stack = VecStack::default();
-        stack.push(1);
-        stack.pop();
-        assert!(stack.is_empty());
-        stack.pop();
-    }
-
-    #[test]
     fn alloc_stack_ok() {
         let mut stack = AllocStack::new(10);
         stack.push(3);
         stack.push(2);
         stack.push(1);
+        assert_eq!(&1, stack.peek());
         assert_eq!(3, stack.len());
         assert_eq!(1, stack.pop());
 
@@ -264,5 +249,40 @@ mod tests {
         let mut stack = AllocStack::new(1);
         stack.push(1);
         stack.push(2);
+    }
+
+    #[test]
+    fn vec_stack_ok() {
+        let mut stack = VecStack::default();
+        stack.push(3);
+        stack.push(2);
+        stack.push(1);
+        assert_eq!(&1, stack.peek());
+        assert_eq!(3, stack.len());
+        assert_eq!(1, stack.pop());
+
+        stack.pop();
+        stack.pop();
+        assert!(stack.is_empty());
+
+        let range = 4..=9;
+        for i in range.clone() {
+            stack.push(i);
+        }
+        assert_eq!(range.clone().count(), stack.len());
+        for i in range.rev() {
+            assert_eq!(i, stack.pop());
+        }
+        assert!(stack.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "attempt to pop an empty stack")]
+    fn vec_stack_panic_underflow() {
+        let mut stack = VecStack::default();
+        stack.push(1);
+        stack.pop();
+        assert!(stack.is_empty());
+        stack.pop();
     }
 }
