@@ -1,5 +1,7 @@
+use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::mem::{self, MaybeUninit};
 
+#[derive(Debug)]
 pub struct ArrayStack<T, const N: usize> {
     stack: [MaybeUninit<T>; N],
     i: usize,
@@ -23,7 +25,7 @@ impl<T, const N: usize> ArrayStack<T, N> {
         self.i
     }
 
-    pub fn capacity(&self) -> usize {
+    pub fn max_capacity(&self) -> usize {
         self.stack.len()
     }
 
@@ -41,6 +43,7 @@ impl<T, const N: usize> ArrayStack<T, N> {
     }
 }
 
+#[derive(Debug)]
 pub struct VecStack<T> {
     stack: Vec<T>,
 }
@@ -79,6 +82,68 @@ impl<T> VecStack<T> {
     }
 }
 
+#[derive(Debug)]
+pub struct AllocStack<T> {
+    layout: Layout,
+    base: *mut T,
+    top: *mut T,
+    size: isize,
+}
+
+impl<T> AllocStack<T> {
+    pub fn new(size: usize) -> Self {
+        let size = size as isize;
+        let layout = Layout::array::<T>(size as usize).expect("Couldn't create memory layout");
+        let base = unsafe { alloc(layout) };
+        if base.is_null() {
+            handle_alloc_error(layout);
+        }
+        let base = base as *mut _;
+        let top = base;
+
+        Self {
+            layout,
+            base,
+            top,
+            size,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.base == self.top
+    }
+
+    pub fn len(&self) -> usize {
+        unsafe { self.top.offset_from(self.base) as usize }
+    }
+
+    pub fn max_capacity(&self) -> usize {
+        self.size as usize
+    }
+
+    pub fn push(&mut self, val: T) {
+        unsafe {
+            assert!(self.top < self.base.offset(self.size));
+            std::ptr::write(self.top, val);
+            self.top = self.top.offset(1);
+        }
+    }
+
+    pub fn pop(&mut self) -> T {
+        unsafe {
+            self.top = self.top.offset(-1);
+            assert!(self.top >= self.base);
+            std::ptr::read(self.top)
+        }
+    }
+}
+
+impl<T> Drop for AllocStack<T> {
+    fn drop(&mut self) {
+        unsafe { dealloc(self.base as *mut u8, self.layout) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +154,7 @@ mod tests {
         stack.push(3);
         stack.push(2);
         stack.push(1);
+        assert_eq!(3, stack.len());
         assert_eq!(1, stack.pop());
 
         stack.pop();
@@ -99,6 +165,7 @@ mod tests {
         for i in range.clone() {
             stack.push(i);
         }
+        assert_eq!(range.clone().count(), stack.len());
         for i in range.rev() {
             assert_eq!(i, stack.pop());
         }
@@ -129,6 +196,7 @@ mod tests {
         stack.push(3);
         stack.push(2);
         stack.push(1);
+        assert_eq!(3, stack.len());
         assert_eq!(1, stack.pop());
 
         stack.pop();
@@ -139,6 +207,7 @@ mod tests {
         for i in range.clone() {
             stack.push(i);
         }
+        assert_eq!(range.clone().count(), stack.len());
         for i in range.rev() {
             assert_eq!(i, stack.pop());
         }
@@ -153,5 +222,47 @@ mod tests {
         stack.pop();
         assert!(stack.is_empty());
         stack.pop();
+    }
+
+    #[test]
+    fn alloc_stack_ok() {
+        let mut stack = AllocStack::new(10);
+        stack.push(3);
+        stack.push(2);
+        stack.push(1);
+        assert_eq!(3, stack.len());
+        assert_eq!(1, stack.pop());
+
+        stack.pop();
+        stack.pop();
+        assert!(stack.is_empty());
+
+        let range = 4..=9;
+        for i in range.clone() {
+            stack.push(i);
+        }
+        assert_eq!(range.clone().count(), stack.len());
+        for i in range.rev() {
+            assert_eq!(i, stack.pop());
+        }
+        assert!(stack.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion failed: self.top >= self.base")]
+    fn alloc_stack_panic_underflow() {
+        let mut stack = AllocStack::new(1);
+        stack.push(1);
+        stack.pop();
+        assert!(stack.is_empty());
+        stack.pop();
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion failed: self.top < self.base.offset(self.size)")]
+    fn alloc_stack_overflow() {
+        let mut stack = AllocStack::new(1);
+        stack.push(1);
+        stack.push(2);
     }
 }
