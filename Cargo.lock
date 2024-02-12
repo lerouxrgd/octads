@@ -3,5 +3,23 @@
 version = 3
 
 [[package]]
+name = "libc"
+version = "0.2.153"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c198f91728a82281a64e1f4f9eeb25d82cb32a5de251c6bd1b5154d63a8e7bd"
+
+[[package]]
+name = "libc-print"
+version = "0.1.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c17f111e2175c779daaf5e89fe3a3b0776b0adec218bc1159c56e4d3f58032f5"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "octad"
 version = "0.1.0"
+dependencies = [
+ "libc-print",
+]
