@@ -1,5 +1,4 @@
 use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
-use alloc::vec::Vec;
 use core::mem::{self, MaybeUninit};
 use core::ptr;
 
@@ -137,9 +136,9 @@ pub struct LinkedListStack<T> {
 }
 
 impl<T> LinkedListStack<T> {
-    pub fn new(block_size: usize) -> Self {
+    pub fn new(block_size: usize, blocks_cap: usize) -> Self {
         Self {
-            allocator: BlockAllocator::new(block_size, 2),
+            allocator: BlockAllocator::new(block_size, blocks_cap),
             len: 0,
             head: ptr::null_mut(),
         }
@@ -164,6 +163,10 @@ impl<T> LinkedListStack<T> {
     }
 
     pub fn pop(&mut self) -> T {
+        assert!(
+            !self.head.is_null(),
+            "underflow: popping from an empty stack"
+        );
         let tmp = self.head;
         self.head = unsafe { (*tmp).next };
         let mut val = MaybeUninit::uninit();
@@ -191,47 +194,6 @@ impl<T> Drop for LinkedListStack<T> {
                 self.allocator.return_node(tmp);
             }
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct VecStack<T> {
-    stack: Vec<T>,
-}
-
-impl<T> Default for VecStack<T> {
-    fn default() -> Self {
-        Self {
-            stack: Vec::default(),
-        }
-    }
-}
-
-impl<T> VecStack<T> {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            stack: Vec::with_capacity(capacity),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.stack.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.stack.len()
-    }
-
-    pub fn push(&mut self, val: T) {
-        self.stack.push(val);
-    }
-
-    pub fn pop(&mut self) -> T {
-        self.stack.pop().expect("attempt to pop an empty stack")
-    }
-
-    pub fn peek(&self) -> &T {
-        self.stack.last().expect("attempt to peek an empty stack")
     }
 }
 
@@ -326,43 +288,8 @@ mod tests {
     }
 
     #[test]
-    fn vec_stack_ok() {
-        let mut stack = VecStack::default();
-        stack.push(3);
-        stack.push(2);
-        stack.push(1);
-        assert_eq!(&1, stack.peek());
-        assert_eq!(3, stack.len());
-        assert_eq!(1, stack.pop());
-
-        stack.pop();
-        stack.pop();
-        assert!(stack.is_empty());
-
-        let range = 4..=9;
-        for i in range.clone() {
-            stack.push(i);
-        }
-        assert_eq!(range.clone().count(), stack.len());
-        for i in range.rev() {
-            assert_eq!(i, stack.pop());
-        }
-        assert!(stack.is_empty());
-    }
-
-    #[test]
-    #[should_panic(expected = "attempt to pop an empty stack")]
-    fn vec_stack_panic_underflow() {
-        let mut stack = VecStack::default();
-        stack.push(1);
-        stack.pop();
-        assert!(stack.is_empty());
-        stack.pop();
-    }
-
-    #[test]
     fn linked_list_stack_ok() {
-        let mut stack = LinkedListStack::new(2);
+        let mut stack = LinkedListStack::new(2, 1);
         stack.push(3);
         stack.push(2);
         stack.push(1);
@@ -383,5 +310,15 @@ mod tests {
             assert_eq!(i, stack.pop());
         }
         assert!(stack.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "underflow: popping from an empty stack")]
+    fn linked_list_stack_panic_underflow() {
+        let mut stack = LinkedListStack::new(4, 2);
+        stack.push(1);
+        stack.pop();
+        assert!(stack.is_empty());
+        stack.pop();
     }
 }

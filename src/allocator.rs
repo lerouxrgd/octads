@@ -80,7 +80,7 @@ impl<T> BlockAllocator<T> {
         node
     }
 
-    // Safety: returned node must contain a MaybeUninit::uninit() value
+    // Safety: returned node must have a value uninit/dropped
     pub unsafe fn return_node(&mut self, node: *mut Node<T>) {
         (*node).next = self.free_list;
         self.free_list = node;
