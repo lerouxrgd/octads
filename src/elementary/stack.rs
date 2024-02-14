@@ -12,14 +12,18 @@ pub struct ArrayStack<T, const N: usize> {
 
 impl<T, const N: usize> Default for ArrayStack<T, N> {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T, const N: usize> ArrayStack<T, N> {
+    pub fn new() -> Self {
         Self {
             stack: unsafe { MaybeUninit::uninit().assume_init() },
             len: 0,
         }
     }
-}
 
-impl<T, const N: usize> ArrayStack<T, N> {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
@@ -65,13 +69,13 @@ impl<T, const N: usize> Drop for ArrayStack<T, N> {
 }
 
 #[derive(Debug)]
-pub struct AllocatedStack<T> {
+pub struct ChunkStack<T> {
     base: *mut T,
     top: *mut T,
     max_size: usize,
 }
 
-impl<T> AllocatedStack<T> {
+impl<T> ChunkStack<T> {
     pub fn new(max_size: usize) -> Self {
         let layout = Layout::array::<T>(max_size).expect("Couldn't create memory layout");
         let base = unsafe { alloc(layout) };
@@ -97,7 +101,7 @@ impl<T> AllocatedStack<T> {
     }
 
     pub fn max_len(&self) -> usize {
-        self.max_size as usize
+        self.max_size
     }
 
     pub fn push(&mut self, val: T) {
@@ -128,7 +132,7 @@ impl<T> AllocatedStack<T> {
     }
 }
 
-impl<T> Drop for AllocatedStack<T> {
+impl<T> Drop for ChunkStack<T> {
     fn drop(&mut self) {
         while !self.is_empty() {
             self.pop();
@@ -206,15 +210,15 @@ impl<T> Drop for LinkedListStack<T> {
 }
 
 #[derive(Debug)]
-pub struct LinkedAllocatedStack<T> {
+pub struct LinkedChunksStack<T> {
     base: *mut T,
     top: *mut T,
     chunk_size: usize,
-    previous: *mut LinkedAllocatedStack<T>,
+    previous: *mut LinkedChunksStack<T>,
     len: usize,
 }
 
-impl<T> LinkedAllocatedStack<T> {
+impl<T> LinkedChunksStack<T> {
     pub fn new(chunk_size: usize) -> Self {
         let chunk_layout = Layout::array::<T>(chunk_size).expect("Couldn't create memory layout");
         let base = unsafe { alloc(chunk_layout) };
@@ -243,12 +247,12 @@ impl<T> LinkedAllocatedStack<T> {
 
     pub fn push(&mut self, val: T) {
         if self.top == unsafe { self.base.add(self.chunk_size) } {
-            let node_layout = Layout::new::<LinkedAllocatedStack<T>>();
+            let node_layout = Layout::new::<LinkedChunksStack<T>>();
             let new_node = unsafe { alloc(node_layout) };
             if new_node.is_null() {
                 handle_alloc_error(node_layout);
             }
-            let new_node = new_node as *mut LinkedAllocatedStack<T>;
+            let new_node = new_node as *mut LinkedChunksStack<T>;
             unsafe {
                 (*new_node).base = self.base;
                 (*new_node).top = self.top;
@@ -285,7 +289,7 @@ impl<T> LinkedAllocatedStack<T> {
                 self.base = (*old_node).base;
                 self.top = (*old_node).top;
                 self.chunk_size = (*old_node).chunk_size;
-                let node_layout = Layout::new::<LinkedAllocatedStack<T>>();
+                let node_layout = Layout::new::<LinkedChunksStack<T>>();
                 dealloc(old_node as *mut u8, node_layout);
             }
         }
@@ -305,7 +309,7 @@ impl<T> LinkedAllocatedStack<T> {
     }
 }
 
-impl<T> Drop for LinkedAllocatedStack<T> {
+impl<T> Drop for LinkedChunksStack<T> {
     fn drop(&mut self) {
         while !self.is_empty() {
             self.pop();
@@ -321,7 +325,7 @@ mod tests {
 
     #[test]
     fn array_stack_ok() {
-        let mut stack: ArrayStack<usize, 10> = ArrayStack::default();
+        let mut stack: ArrayStack<usize, 10> = ArrayStack::new();
         stack.push(3);
         stack.push(2);
         stack.push(1);
@@ -347,7 +351,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
     fn array_stack_panic_underflow() {
-        let mut stack: ArrayStack<usize, 1> = ArrayStack::default();
+        let mut stack: ArrayStack<usize, 1> = ArrayStack::new();
         stack.push(1);
         stack.pop();
         assert!(stack.is_empty());
@@ -357,14 +361,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "overflow: pushing to a full stack")]
     fn array_stack_overflow() {
-        let mut stack: ArrayStack<usize, 1> = ArrayStack::default();
+        let mut stack: ArrayStack<usize, 1> = ArrayStack::new();
         stack.push(1);
         stack.push(2);
     }
 
     #[test]
-    fn allocated_stack_ok() {
-        let mut stack = AllocatedStack::new(10);
+    fn chunk_stack_ok() {
+        let mut stack = ChunkStack::new(10);
         stack.push(3);
         stack.push(2);
         stack.push(1);
@@ -389,8 +393,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
-    fn allocated_stack_panic_underflow() {
-        let mut stack = AllocatedStack::new(1);
+    fn chunk_stack_panic_underflow() {
+        let mut stack = ChunkStack::new(1);
         stack.push(1);
         stack.pop();
         assert!(stack.is_empty());
@@ -399,8 +403,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "overflow: pushing to a full stack")]
-    fn allocated_stack_overflow() {
-        let mut stack = AllocatedStack::new(1);
+    fn chunk_stack_overflow() {
+        let mut stack = ChunkStack::new(1);
         stack.push(1);
         stack.push(2);
     }
@@ -441,8 +445,8 @@ mod tests {
     }
 
     #[test]
-    fn linked_allocated_stack_ok() {
-        let mut stack = LinkedAllocatedStack::new(2);
+    fn linked_chunks_stack_ok() {
+        let mut stack = LinkedChunksStack::new(2);
         stack.push(3);
         stack.push(2);
         stack.push(1);
@@ -467,8 +471,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
-    fn linked_allocated_stack_panic_underflow() {
-        let mut stack = LinkedAllocatedStack::new(4);
+    fn linked_chunks_stack_panic_underflow() {
+        let mut stack = LinkedChunksStack::new(4);
         stack.push(1);
         stack.pop();
         assert!(stack.is_empty());
