@@ -1,21 +1,35 @@
-use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc, Allocator, Global, Layout};
+use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc, Layout};
 use core::mem::MaybeUninit;
 use core::ptr;
 
 #[derive(Debug)]
 pub struct BlockAllocator<T> {
-    blocks_ptr: *mut Node<T>,
-    nb_blocks: usize,
+    blocks: *mut *mut Node<T>,
+    blocks_cap: usize,
+    blocks_len: usize,
+    cursor: *mut Node<T>,
     block_size: usize,
     size_left: usize,
     free_list: *mut Node<T>,
 }
 
 impl<T> BlockAllocator<T> {
-    pub fn new(block_size: usize) -> Self {
+    pub fn new(block_size: usize, blocks_cap: usize) -> Self {
+        assert!(block_size > 0, "invalid block size of 0");
+        assert!(blocks_cap > 0, "invalid blocks capacity of 0");
+
+        let layout =
+            Layout::array::<*mut Node<T>>(blocks_cap).expect("Couldn't create memory layout");
+        let blocks = unsafe { alloc(layout) };
+        if blocks.is_null() {
+            handle_alloc_error(layout);
+        }
+
         Self {
-            blocks_ptr: ptr::null_mut(),
-            nb_blocks: 0,
+            blocks: blocks as *mut _,
+            blocks_len: 0,
+            blocks_cap,
+            cursor: ptr::null_mut(),
             block_size,
             size_left: 0,
             free_list: ptr::null_mut(),
@@ -28,36 +42,35 @@ impl<T> BlockAllocator<T> {
             node = self.free_list;
             self.free_list = unsafe { (*self.free_list).next };
         } else {
-            if self.blocks_ptr.is_null() {
-                self.nb_blocks = 1;
-                let layout = Layout::array::<Node<T>>(self.nb_blocks * self.block_size)
+            if self.cursor.is_null() || self.size_left == 0 {
+                let layout = Layout::array::<Node<T>>(self.block_size)
                     .expect("Couldn't create memory layout");
-                // TODO: expolore this instead:
-                // let blocks_ptr = Global.allocate(layout);
-                let blocks_ptr = unsafe { alloc(layout) };
-                if blocks_ptr.is_null() {
+                let new_block = unsafe { alloc(layout) };
+                if new_block.is_null() {
                     handle_alloc_error(layout);
                 }
-                self.blocks_ptr = blocks_ptr as *mut _;
-                self.size_left = self.block_size;
-            } else if self.size_left == 0 {
-                let old_layout =
-                    Layout::array::<Node<T>>(self.nb_blocks * self.block_size).unwrap();
-                self.nb_blocks += 1;
-                let new_layout = Layout::array::<Node<T>>(self.nb_blocks * self.block_size)
-                    .expect("Couldn't create memory layout");
-                // TODO: this realloc invalidates previously issued pointers
-                let blocks_ptr =
-                    unsafe { realloc(self.blocks_ptr as *mut u8, old_layout, new_layout.size()) };
-                if blocks_ptr.is_null() {
-                    handle_alloc_error(new_layout);
+                let new_block = new_block as *mut _;
+
+                if self.blocks_len == self.blocks_cap {
+                    let old_layout = Layout::array::<*mut Node<T>>(self.blocks_cap).unwrap();
+                    self.blocks_cap *= 2;
+                    let new_layout = Layout::array::<*mut Node<T>>(self.blocks_cap)
+                        .expect("Couldn't create memory layout");
+                    let blocks =
+                        unsafe { realloc(self.blocks as *mut u8, old_layout, new_layout.size()) };
+                    if blocks.is_null() {
+                        handle_alloc_error(layout);
+                    }
+                    self.blocks = blocks as *mut _;
                 }
-                self.blocks_ptr = blocks_ptr as *mut _;
+                unsafe { self.blocks.add(self.blocks_len).write(new_block) };
+                self.blocks_len += 1;
+
+                self.cursor = new_block;
                 self.size_left = self.block_size;
             }
-            let ptr_offset =
-                (self.nb_blocks - 1) * self.block_size + (self.block_size - self.size_left);
-            node = unsafe { self.blocks_ptr.add(ptr_offset) };
+            node = self.cursor;
+            self.cursor = unsafe { self.cursor.add(1) };
             self.size_left -= 1;
         }
         unsafe {
@@ -76,10 +89,12 @@ impl<T> BlockAllocator<T> {
 
 impl<T> Drop for BlockAllocator<T> {
     fn drop(&mut self) {
-        if !self.blocks_ptr.is_null() {
-            let layout = Layout::array::<T>(self.nb_blocks * self.block_size).unwrap();
-            unsafe { dealloc(self.blocks_ptr as *mut u8, layout) };
+        for i in 0..self.blocks_len {
+            let layout = Layout::array::<Node<T>>(self.block_size).unwrap();
+            unsafe { dealloc(*self.blocks.add(i) as *mut u8, layout) };
         }
+        let layout = Layout::array::<*mut Node<T>>(self.blocks_cap).unwrap();
+        unsafe { dealloc(self.blocks as *mut u8, layout) };
     }
 }
 

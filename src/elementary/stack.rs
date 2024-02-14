@@ -104,11 +104,11 @@ impl<T> AllocatedStack<T> {
 
     pub fn pop(&mut self) -> T {
         unsafe {
-            self.top = self.top.offset(-1);
             assert!(
-                self.top >= self.base,
+                self.top > self.base,
                 "underflow: popping from an empty stack"
             );
+            self.top = self.top.offset(-1);
             ptr::read(self.top)
         }
     }
@@ -139,7 +139,7 @@ pub struct LinkedListStack<T> {
 impl<T> LinkedListStack<T> {
     pub fn new(block_size: usize) -> Self {
         Self {
-            allocator: BlockAllocator::new(block_size),
+            allocator: BlockAllocator::new(block_size, 2),
             len: 0,
             head: ptr::null_mut(),
         }
@@ -186,8 +186,6 @@ impl<T> Drop for LinkedListStack<T> {
         while !next.is_null() {
             let tmp = next;
             unsafe {
-                #[cfg(test)]
-                libc_print::libc_println!("Hello !");
                 (*tmp).val.assume_init_drop();
                 next = (*tmp).next;
                 self.allocator.return_node(tmp);
@@ -309,7 +307,6 @@ mod tests {
         assert!(stack.is_empty());
     }
 
-    // TODO: investigate cargo miri test allocated_stack
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
     fn allocated_stack_panic_underflow() {
@@ -368,23 +365,23 @@ mod tests {
         let mut stack = LinkedListStack::new(2);
         stack.push(3);
         stack.push(2);
-        // stack.push(1); // TODO: this triggers a bug on Drop due to bad realloc usage
-        // assert_eq!(&1, stack.peek());
-        // assert_eq!(3, stack.len());
-        // assert_eq!(1, stack.pop());
+        stack.push(1);
+        assert_eq!(&1, stack.peek());
+        assert_eq!(3, stack.len());
+        assert_eq!(1, stack.pop());
 
-        // stack.pop();
-        // stack.pop();
-        // assert!(stack.is_empty());
+        stack.pop();
+        stack.pop();
+        assert!(stack.is_empty());
 
-        // let range = 4..=9;
-        // for i in range.clone() {
-        //     stack.push(i);
-        // }
-        // assert_eq!(range.clone().count(), stack.len());
-        // for i in range.rev() {
-        //     assert_eq!(i, stack.pop());
-        // }
-        // assert!(stack.is_empty());
+        let range = 4..=9;
+        for i in range.clone() {
+            stack.push(i);
+        }
+        assert_eq!(range.clone().count(), stack.len());
+        for i in range.rev() {
+            assert_eq!(i, stack.pop());
+        }
+        assert!(stack.is_empty());
     }
 }
