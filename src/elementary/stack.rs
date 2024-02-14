@@ -42,6 +42,7 @@ impl<T, const N: usize> ArrayStack<T, N> {
     }
 
     pub fn pop(&mut self) -> T {
+        assert!(!self.is_empty(), "underflow: popping an empty stack");
         self.len -= 1;
         let mut val = MaybeUninit::uninit();
         mem::swap(&mut self.stack[self.len], &mut val);
@@ -49,6 +50,7 @@ impl<T, const N: usize> ArrayStack<T, N> {
     }
 
     pub fn peek(&self) -> &T {
+        assert!(!self.is_empty(), "underflow: peeking an empty stack");
         let peek = self.len - 1;
         unsafe { self.stack[peek].assume_init_ref() }
     }
@@ -86,7 +88,7 @@ impl<T> AllocatedStack<T> {
         unsafe { self.top.offset_from(self.base) as usize }
     }
 
-    pub fn max_ln(&self) -> usize {
+    pub fn max_len(&self) -> usize {
         self.max_size as usize
     }
 
@@ -103,10 +105,7 @@ impl<T> AllocatedStack<T> {
 
     pub fn pop(&mut self) -> T {
         unsafe {
-            assert!(
-                self.top > self.base,
-                "underflow: popping from an empty stack"
-            );
+            assert!(!self.is_empty(), "underflow: popping an empty stack");
             self.top = self.top.offset(-1);
             ptr::read(self.top)
         }
@@ -114,8 +113,8 @@ impl<T> AllocatedStack<T> {
 
     pub fn peek(&self) -> &T {
         unsafe {
+            assert!(!self.is_empty(), "underflow: peeking an empty stack");
             let peek = self.top.offset(-1);
-            assert!(peek >= self.base, "underflow: peeking from an empty stack");
             &*peek
         }
     }
@@ -163,10 +162,7 @@ impl<T> LinkedListStack<T> {
     }
 
     pub fn pop(&mut self) -> T {
-        assert!(
-            !self.head.is_null(),
-            "underflow: popping from an empty stack"
-        );
+        assert!(!self.is_empty(), "underflow: popping an empty stack");
         let tmp = self.head;
         self.head = unsafe { (*tmp).next };
         let mut val = MaybeUninit::uninit();
@@ -179,6 +175,7 @@ impl<T> LinkedListStack<T> {
     }
 
     pub fn peek(&self) -> &T {
+        assert!(!self.is_empty(), "underflow: peeking an empty stack");
         unsafe { (*self.head).val.assume_init_ref() }
     }
 }
@@ -227,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "attempt to subtract with overflow")]
+    #[should_panic(expected = "underflow: popping an empty stack")]
     fn array_stack_panic_underflow() {
         let mut stack: ArrayStack<usize, 1> = ArrayStack::default();
         stack.push(1);
@@ -270,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "underflow: popping from an empty stack")]
+    #[should_panic(expected = "underflow: popping an empty stack")]
     fn allocated_stack_panic_underflow() {
         let mut stack = AllocatedStack::new(1);
         stack.push(1);
@@ -313,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "underflow: popping from an empty stack")]
+    #[should_panic(expected = "underflow: popping an empty stack")]
     fn linked_list_stack_panic_underflow() {
         let mut stack = LinkedListStack::new(4, 2);
         stack.push(1);
