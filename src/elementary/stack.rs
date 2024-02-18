@@ -1,5 +1,5 @@
 use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
-use core::mem::{self, MaybeUninit};
+use core::mem::MaybeUninit;
 use core::ptr;
 
 use crate::allocator::{BlockAllocator, Node};
@@ -48,9 +48,7 @@ impl<T, const N: usize> ArrayStack<T, N> {
     pub fn pop(&mut self) -> T {
         assert!(!self.is_empty(), "underflow: popping from an empty stack");
         self.len -= 1;
-        let mut val = MaybeUninit::uninit();
-        mem::swap(&mut self.stack[self.len], &mut val);
-        unsafe { val.assume_init() }
+        unsafe { self.stack[self.len].assume_init_read() }
     }
 
     pub fn peek(&self) -> &T {
@@ -124,8 +122,8 @@ impl<T> ChunkStack<T> {
     }
 
     pub fn peek(&self) -> &T {
+        assert!(!self.is_empty(), "underflow: peeking at an empty stack");
         unsafe {
-            assert!(!self.is_empty(), "underflow: peeking at an empty stack");
             let peek = self.top.offset(-1);
             &*peek
         }
@@ -179,13 +177,12 @@ impl<T> LinkedListStack<T> {
     pub fn pop(&mut self) -> T {
         assert!(!self.is_empty(), "underflow: popping from an empty stack");
         let tmp = self.head;
-        self.head = unsafe { (*tmp).next };
-        let mut val = MaybeUninit::uninit();
         unsafe {
-            mem::swap(&mut val, &mut (*tmp).val);
+            self.head = (*tmp).next;
+            let val = (*tmp).val.assume_init_read();
             self.allocator.return_node(tmp);
             self.len -= 1;
-            val.assume_init()
+            val
         }
     }
 
@@ -301,6 +298,7 @@ impl<T> LinkedChunksStack<T> {
     }
 
     pub fn peek(&self) -> &T {
+        assert!(!self.is_empty(), "underflow: peeking at an empty stack");
         if self.base == self.top {
             unsafe { &*(*self.previous).top.offset(-1) }
         } else {
