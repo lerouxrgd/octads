@@ -150,6 +150,75 @@ impl<T> Drop for LinkedListQueue<T> {
     }
 }
 
+#[derive(Debug)]
+pub struct CyclicListQueue<T> {
+    allocator: BlockAllocator<T>,
+    len: usize,
+    head: *mut Node<T>,
+}
+
+impl<T> CyclicListQueue<T> {
+    pub fn new(block_size: usize, blocks_cap: usize) -> Self {
+        let mut allocator = BlockAllocator::new(block_size, blocks_cap);
+        let head = allocator.get_node();
+        unsafe { (*head).next = head };
+        Self {
+            allocator,
+            len: 0,
+            head,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        unsafe { self.head == (*self.head).next }
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn enqueue(&mut self, val: T) {
+        let node = self.allocator.get_node();
+        unsafe {
+            (*node).val = MaybeUninit::new(val);
+            let tmp = self.head;
+            self.head = node;
+            (*node).next = (*tmp).next;
+            (*tmp).next = node;
+        }
+        self.len += 1;
+    }
+
+    pub fn dequeue(&mut self) -> T {
+        assert!(!self.is_empty(), "underflow: dequeuing from an empty queue");
+        unsafe {
+            let tmp = (*(*self.head).next).next;
+            (*(*self.head).next).next = (*tmp).next;
+            if tmp == self.head {
+                self.head = (*tmp).next;
+            }
+            let val = (*tmp).val.assume_init_read();
+            self.allocator.return_node(tmp);
+            self.len -= 1;
+            val
+        }
+    }
+
+    pub fn peek(&self) -> &T {
+        assert!(!self.is_empty(), "underflow: peeking at an empty queue");
+        unsafe { (*(*(*self.head).next).next).val.assume_init_ref() }
+    }
+}
+
+impl<T> Drop for CyclicListQueue<T> {
+    fn drop(&mut self) {
+        while !self.is_empty() {
+            self.dequeue();
+        }
+        unsafe { self.allocator.return_node(self.head) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,6 +297,42 @@ mod tests {
     #[should_panic(expected = "underflow: dequeuing from an empty queue")]
     fn linked_list_queue_panic_underflow() {
         let mut q = LinkedListQueue::new(4, 2);
+        q.enqueue(1);
+        q.dequeue();
+        assert!(q.is_empty());
+        q.dequeue();
+    }
+
+    #[test]
+    fn cyclic_list_queue_ok() {
+        let mut q = CyclicListQueue::new(2, 1);
+        q.enqueue(3);
+        q.enqueue(2);
+        q.enqueue(1);
+        assert_eq!(&3, q.peek());
+        assert_eq!(3, q.len());
+        assert_eq!(3, q.dequeue());
+
+        q.dequeue();
+        q.dequeue();
+        assert!(q.is_empty());
+
+        let range = 4..=9;
+        for (j, i) in range.clone().enumerate() {
+            assert_eq!(j, q.len());
+            q.enqueue(i);
+        }
+        assert_eq!(range.clone().count(), q.len());
+        for i in range {
+            assert_eq!(i, q.dequeue());
+        }
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "underflow: dequeuing from an empty queue")]
+    fn cyclic_list_queue_panic_underflow() {
+        let mut q = CyclicListQueue::new(4, 2);
         q.enqueue(1);
         q.dequeue();
         assert!(q.is_empty());

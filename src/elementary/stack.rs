@@ -270,7 +270,7 @@ impl<T> LinkedChunksStack<T> {
         }
         unsafe {
             ptr::write(self.top, val);
-            self.top = self.top.offset(1);
+            self.top = self.top.add(1);
             self.len += 1;
         }
     }
