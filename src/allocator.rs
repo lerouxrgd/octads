@@ -84,7 +84,7 @@ impl<T> BlockAllocator<T> {
     ///
     /// Returned node must have its val uninit/dropped
     pub unsafe fn return_node(&mut self, node: *mut Node<T>) {
-        (*node).next = self.free_list;
+        unsafe { (*node).next = self.free_list };
         self.free_list = node;
     }
 }

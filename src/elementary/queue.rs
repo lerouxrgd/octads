@@ -4,7 +4,7 @@ use core::{mem::MaybeUninit, ptr};
 use crate::allocator::{BlockAllocator, Node};
 
 #[derive(Debug)]
-pub struct ChunkQueue<T> {
+pub struct BoundedQueue<T> {
     base: *mut T,
     front: usize,
     rear: usize,
@@ -12,7 +12,7 @@ pub struct ChunkQueue<T> {
     len: usize,
 }
 
-impl<T> ChunkQueue<T> {
+impl<T> BoundedQueue<T> {
     pub fn new(max_size: usize) -> Self {
         let layout = Layout::array::<T>(max_size).expect("Couldn't create memory layout");
         let base = unsafe { alloc(layout) };
@@ -69,7 +69,7 @@ impl<T> ChunkQueue<T> {
     }
 }
 
-impl<T> Drop for ChunkQueue<T> {
+impl<T> Drop for BoundedQueue<T> {
     fn drop(&mut self) {
         while !self.is_empty() {
             self.dequeue();
@@ -224,8 +224,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chunk_queue_ok() {
-        let mut q = ChunkQueue::new(6);
+    fn bounded_queue_ok() {
+        let mut q = BoundedQueue::new(6);
         q.enqueue(3);
         q.enqueue(2);
         q.enqueue(1);
@@ -251,8 +251,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: dequeuing from an empty queue")]
-    fn chunk_queue_panic_underflow() {
-        let mut q = ChunkQueue::new(1);
+    fn bounded_queue_underflow() {
+        let mut q = BoundedQueue::new(1);
         q.enqueue(1);
         q.dequeue();
         assert!(q.is_empty());
@@ -261,8 +261,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "overflow: enqueuing to a full queue")]
-    fn chunk_queue_overflow() {
-        let mut q = ChunkQueue::new(1);
+    fn bounded_queue_overflow() {
+        let mut q = BoundedQueue::new(1);
         q.enqueue(1);
         q.enqueue(2);
     }
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: dequeuing from an empty queue")]
-    fn linked_list_queue_panic_underflow() {
+    fn linked_list_queue_underflow() {
         let mut q = LinkedListQueue::new(4, 2);
         q.enqueue(1);
         q.dequeue();
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: dequeuing from an empty queue")]
-    fn cyclic_list_queue_panic_underflow() {
+    fn cyclic_list_queue_underflow() {
         let mut q = CyclicListQueue::new(4, 2);
         q.enqueue(1);
         q.dequeue();

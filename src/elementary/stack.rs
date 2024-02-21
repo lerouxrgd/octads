@@ -67,13 +67,13 @@ impl<T, const N: usize> Drop for ArrayStack<T, N> {
 }
 
 #[derive(Debug)]
-pub struct ChunkStack<T> {
+pub struct BoundedStack<T> {
     base: *mut T,
     top: *mut T,
     max_size: usize,
 }
 
-impl<T> ChunkStack<T> {
+impl<T> BoundedStack<T> {
     pub fn new(max_size: usize) -> Self {
         let layout = Layout::array::<T>(max_size).expect("Couldn't create memory layout");
         let base = unsafe { alloc(layout) };
@@ -130,7 +130,7 @@ impl<T> ChunkStack<T> {
     }
 }
 
-impl<T> Drop for ChunkStack<T> {
+impl<T> Drop for BoundedStack<T> {
     fn drop(&mut self) {
         while !self.is_empty() {
             self.pop();
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
-    fn array_stack_panic_underflow() {
+    fn array_stack_underflow() {
         let mut stack: ArrayStack<usize, 1> = ArrayStack::new();
         stack.push(1);
         stack.pop();
@@ -365,8 +365,8 @@ mod tests {
     }
 
     #[test]
-    fn chunk_stack_ok() {
-        let mut stack = ChunkStack::new(10);
+    fn bounded_stack_ok() {
+        let mut stack = BoundedStack::new(10);
         stack.push(3);
         stack.push(2);
         stack.push(1);
@@ -391,8 +391,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
-    fn chunk_stack_panic_underflow() {
-        let mut stack = ChunkStack::new(1);
+    fn bounded_stack_underflow() {
+        let mut stack = BoundedStack::new(1);
         stack.push(1);
         stack.pop();
         assert!(stack.is_empty());
@@ -401,8 +401,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "overflow: pushing to a full stack")]
-    fn chunk_stack_overflow() {
-        let mut stack = ChunkStack::new(1);
+    fn bounded_stack_overflow() {
+        let mut stack = BoundedStack::new(1);
         stack.push(1);
         stack.push(2);
     }
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
-    fn linked_list_stack_panic_underflow() {
+    fn linked_list_stack_underflow() {
         let mut stack = LinkedListStack::new(4, 2);
         stack.push(1);
         stack.pop();
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
-    fn linked_chunks_stack_panic_underflow() {
+    fn linked_chunks_stack_underflow() {
         let mut stack = LinkedChunksStack::new(4);
         stack.push(1);
         stack.pop();
