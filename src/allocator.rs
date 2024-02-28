@@ -125,3 +125,20 @@ impl<T> Nodable for Node<T> {
         self.next = next;
     }
 }
+
+#[derive(Debug)]
+pub struct BiNode<T> {
+    pub next: *mut BiNode<T>,
+    pub prev: *mut BiNode<T>,
+    pub val: MaybeUninit<T>,
+}
+
+impl<T> Nodable for BiNode<T> {
+    fn get_next(&self) -> *mut Self {
+        self.next
+    }
+
+    fn set_next(&mut self, next: *mut Self) {
+        self.next = next;
+    }
+}

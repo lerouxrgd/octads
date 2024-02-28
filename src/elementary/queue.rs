@@ -1,7 +1,7 @@
 use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use core::{mem::MaybeUninit, ptr};
 
-use crate::allocator::{BlockAllocator, Node};
+use crate::allocator::{BiNode, BlockAllocator, Node};
 
 #[derive(Debug)]
 pub struct BoundedQueue<T> {
@@ -219,6 +219,74 @@ impl<T> Drop for CyclicListQueue<T> {
     }
 }
 
+#[derive(Debug)]
+pub struct BiListQueue<T> {
+    allocator: BlockAllocator<BiNode<T>>,
+    len: usize,
+    head: *mut BiNode<T>,
+}
+
+impl<T> BiListQueue<T> {
+    pub fn new(block_size: usize, blocks_cap: usize) -> Self {
+        let mut allocator = BlockAllocator::new(block_size, blocks_cap);
+        let head: *mut BiNode<_> = allocator.get_node();
+        unsafe { (*head).next = head };
+        unsafe { (*head).prev = head };
+        Self {
+            allocator,
+            len: 0,
+            head,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        unsafe { self.head == (*self.head).next }
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn enqueue(&mut self, val: T) {
+        let node = self.allocator.get_node();
+        unsafe {
+            (*node).val = MaybeUninit::new(val);
+            (*node).next = (*self.head).next;
+            (*self.head).next = node;
+            (*(*node).next).prev = node;
+            (*node).prev = self.head;
+        }
+        self.len += 1;
+    }
+
+    pub fn dequeue(&mut self) -> T {
+        assert!(!self.is_empty(), "underflow: dequeuing from an empty queue");
+        unsafe {
+            let tmp = (*self.head).prev;
+            let val = (*tmp).val.assume_init_read();
+            (*(*tmp).prev).next = self.head;
+            (*self.head).prev = (*tmp).prev;
+            self.allocator.return_node(tmp);
+            self.len -= 1;
+            val
+        }
+    }
+
+    pub fn peek(&self) -> &T {
+        assert!(!self.is_empty(), "underflow: peeking at an empty queue");
+        unsafe { (*(*self.head).prev).val.assume_init_ref() }
+    }
+}
+
+impl<T> Drop for BiListQueue<T> {
+    fn drop(&mut self) {
+        while !self.is_empty() {
+            self.dequeue();
+        }
+        unsafe { self.allocator.return_node(self.head) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,6 +401,42 @@ mod tests {
     #[should_panic(expected = "underflow: dequeuing from an empty queue")]
     fn cyclic_list_queue_underflow() {
         let mut q = CyclicListQueue::new(4, 2);
+        q.enqueue(1);
+        q.dequeue();
+        assert!(q.is_empty());
+        q.dequeue();
+    }
+
+    #[test]
+    fn bi_list_queue_ok() {
+        let mut q = BiListQueue::new(2, 1);
+        q.enqueue(3);
+        q.enqueue(2);
+        q.enqueue(1);
+        assert_eq!(&3, q.peek());
+        assert_eq!(3, q.len());
+        assert_eq!(3, q.dequeue());
+
+        q.dequeue();
+        q.dequeue();
+        assert!(q.is_empty());
+
+        let range = 4..=9;
+        for (j, i) in range.clone().enumerate() {
+            assert_eq!(j, q.len());
+            q.enqueue(i);
+        }
+        assert_eq!(range.clone().count(), q.len());
+        for i in range {
+            assert_eq!(i, q.dequeue());
+        }
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "underflow: dequeuing from an empty queue")]
+    fn bi_list_queue_underflow() {
+        let mut q = BiListQueue::new(4, 2);
         q.enqueue(1);
         q.dequeue();
         assert!(q.is_empty());
