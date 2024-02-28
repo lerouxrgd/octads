@@ -81,7 +81,7 @@ impl<T> Drop for BoundedQueue<T> {
 
 #[derive(Debug)]
 pub struct LinkedListQueue<T> {
-    allocator: BlockAllocator<T>,
+    allocator: BlockAllocator<Node<T>>,
     len: usize,
     remove: *mut Node<T>,
     insert: *mut Node<T>,
@@ -152,7 +152,7 @@ impl<T> Drop for LinkedListQueue<T> {
 
 #[derive(Debug)]
 pub struct CyclicListQueue<T> {
-    allocator: BlockAllocator<T>,
+    allocator: BlockAllocator<Node<T>>,
     len: usize,
     head: *mut Node<T>,
 }
@@ -160,7 +160,7 @@ pub struct CyclicListQueue<T> {
 impl<T> CyclicListQueue<T> {
     pub fn new(block_size: usize, blocks_cap: usize) -> Self {
         let mut allocator = BlockAllocator::new(block_size, blocks_cap);
-        let head = allocator.get_node();
+        let head: *mut Node<_> = allocator.get_node();
         unsafe { (*head).next = head };
         Self {
             allocator,

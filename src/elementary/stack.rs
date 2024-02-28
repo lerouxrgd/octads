@@ -142,7 +142,7 @@ impl<T> Drop for BoundedStack<T> {
 
 #[derive(Debug)]
 pub struct LinkedListStack<T> {
-    allocator: BlockAllocator<T>,
+    allocator: BlockAllocator<Node<T>>,
     len: usize,
     head: *mut Node<T>,
 }
