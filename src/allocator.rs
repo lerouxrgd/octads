@@ -2,9 +2,9 @@ use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc, Layout};
 use core::mem::MaybeUninit;
 use core::ptr;
 
-pub trait Nodable {
-    fn get_next(&self) -> *mut Self;
-    fn set_next(&mut self, next: *mut Self);
+pub trait Nodable: Default {
+    fn next(&self) -> *mut Self;
+    fn next_mut(&mut self) -> &mut *mut Self;
 }
 
 #[derive(Debug)]
@@ -50,7 +50,7 @@ where
         let node;
         if !self.free_list.is_null() {
             node = self.free_list;
-            self.free_list = unsafe { (*self.free_list).get_next() };
+            self.free_list = unsafe { (*self.free_list).next() };
         } else {
             if self.cursor.is_null() || self.size_left == 0 {
                 let layout =
@@ -69,7 +69,7 @@ where
                     let blocks =
                         unsafe { realloc(self.blocks as *mut u8, old_layout, new_layout.size()) };
                     if blocks.is_null() {
-                        handle_alloc_error(layout);
+                        handle_alloc_error(new_layout);
                     }
                     self.blocks = blocks as *mut _;
                 }
@@ -83,15 +83,15 @@ where
             self.cursor = unsafe { self.cursor.add(1) };
             self.size_left -= 1;
         }
-        unsafe { (*node).set_next(ptr::null_mut()) };
+        unsafe { ptr::write(node, Default::default()) };
         node
     }
 
     /// # Safety
     ///
-    /// Returned node must have its val uninit/dropped
+    /// Returned node must have its fields uninit/dropped
     pub unsafe fn return_node(&mut self, node: *mut N) {
-        unsafe { (*node).set_next(self.free_list) };
+        unsafe { *(*node).next_mut() = self.free_list };
         self.free_list = node;
     }
 }
@@ -116,13 +116,22 @@ pub struct Node<T> {
     pub val: MaybeUninit<T>,
 }
 
+impl<T> Default for Node<T> {
+    fn default() -> Self {
+        Self {
+            next: ptr::null_mut(),
+            val: MaybeUninit::uninit(),
+        }
+    }
+}
+
 impl<T> Nodable for Node<T> {
-    fn get_next(&self) -> *mut Self {
+    fn next(&self) -> *mut Self {
         self.next
     }
 
-    fn set_next(&mut self, next: *mut Self) {
-        self.next = next;
+    fn next_mut(&mut self) -> &mut *mut Self {
+        &mut self.next
     }
 }
 
@@ -133,12 +142,22 @@ pub struct BiNode<T> {
     pub val: MaybeUninit<T>,
 }
 
+impl<T> Default for BiNode<T> {
+    fn default() -> Self {
+        Self {
+            next: ptr::null_mut(),
+            prev: ptr::null_mut(),
+            val: MaybeUninit::uninit(),
+        }
+    }
+}
+
 impl<T> Nodable for BiNode<T> {
-    fn get_next(&self) -> *mut Self {
+    fn next(&self) -> *mut Self {
         self.next
     }
 
-    fn set_next(&mut self, next: *mut Self) {
-        self.next = next;
+    fn next_mut(&mut self) -> &mut *mut Self {
+        &mut self.next
     }
 }
