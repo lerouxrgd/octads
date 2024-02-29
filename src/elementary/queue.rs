@@ -154,23 +154,23 @@ impl<T> Drop for LinkedListQueue<T> {
 pub struct CyclicListQueue<T> {
     allocator: BlockAllocator<Node<T>>,
     len: usize,
-    head: *mut Node<T>,
+    entry: *mut Node<T>,
 }
 
 impl<T> CyclicListQueue<T> {
     pub fn new(block_size: usize, blocks_cap: usize) -> Self {
         let mut allocator = BlockAllocator::new(block_size, blocks_cap);
-        let head: *mut Node<_> = allocator.get_node();
-        unsafe { (*head).next = head };
+        let entry: *mut Node<_> = allocator.get_node();
+        unsafe { (*entry).next = entry };
         Self {
             allocator,
             len: 0,
-            head,
+            entry,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        unsafe { self.head == (*self.head).next }
+        unsafe { self.entry == (*self.entry).next }
     }
 
     pub fn len(&self) -> usize {
@@ -181,8 +181,8 @@ impl<T> CyclicListQueue<T> {
         let node = self.allocator.get_node();
         unsafe {
             (*node).val = MaybeUninit::new(val);
-            let tmp = self.head;
-            self.head = node;
+            let tmp = self.entry;
+            self.entry = node;
             (*node).next = (*tmp).next;
             (*tmp).next = node;
         }
@@ -192,10 +192,10 @@ impl<T> CyclicListQueue<T> {
     pub fn dequeue(&mut self) -> T {
         assert!(!self.is_empty(), "underflow: dequeuing from an empty queue");
         unsafe {
-            let tmp = (*(*self.head).next).next;
-            (*(*self.head).next).next = (*tmp).next;
-            if tmp == self.head {
-                self.head = (*tmp).next;
+            let tmp = (*(*self.entry).next).next;
+            (*(*self.entry).next).next = (*tmp).next;
+            if tmp == self.entry {
+                self.entry = (*tmp).next;
             }
             let val = (*tmp).val.assume_init_read();
             self.allocator.return_node(tmp);
@@ -206,7 +206,7 @@ impl<T> CyclicListQueue<T> {
 
     pub fn peek(&self) -> &T {
         assert!(!self.is_empty(), "underflow: peeking at an empty queue");
-        unsafe { (*(*(*self.head).next).next).val.assume_init_ref() }
+        unsafe { (*(*(*self.entry).next).next).val.assume_init_ref() }
     }
 }
 
@@ -215,7 +215,7 @@ impl<T> Drop for CyclicListQueue<T> {
         while !self.is_empty() {
             self.dequeue();
         }
-        unsafe { self.allocator.return_node(self.head) }
+        unsafe { self.allocator.return_node(self.entry) }
     }
 }
 
@@ -223,24 +223,24 @@ impl<T> Drop for CyclicListQueue<T> {
 pub struct BiListQueue<T> {
     allocator: BlockAllocator<BiNode<T>>,
     len: usize,
-    head: *mut BiNode<T>,
+    entry: *mut BiNode<T>,
 }
 
 impl<T> BiListQueue<T> {
     pub fn new(block_size: usize, blocks_cap: usize) -> Self {
         let mut allocator = BlockAllocator::new(block_size, blocks_cap);
-        let head: *mut BiNode<_> = allocator.get_node();
-        unsafe { (*head).next = head };
-        unsafe { (*head).prev = head };
+        let entry: *mut BiNode<_> = allocator.get_node();
+        unsafe { (*entry).next = entry };
+        unsafe { (*entry).prev = entry };
         Self {
             allocator,
             len: 0,
-            head,
+            entry,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        unsafe { self.head == (*self.head).next }
+        unsafe { self.entry == (*self.entry).next }
     }
 
     pub fn len(&self) -> usize {
@@ -251,10 +251,10 @@ impl<T> BiListQueue<T> {
         let node = self.allocator.get_node();
         unsafe {
             (*node).val = MaybeUninit::new(val);
-            (*node).next = (*self.head).next;
-            (*self.head).next = node;
+            (*node).next = (*self.entry).next;
+            (*self.entry).next = node;
             (*(*node).next).prev = node;
-            (*node).prev = self.head;
+            (*node).prev = self.entry;
         }
         self.len += 1;
     }
@@ -262,10 +262,10 @@ impl<T> BiListQueue<T> {
     pub fn dequeue(&mut self) -> T {
         assert!(!self.is_empty(), "underflow: dequeuing from an empty queue");
         unsafe {
-            let tmp = (*self.head).prev;
+            let tmp = (*self.entry).prev;
             let val = (*tmp).val.assume_init_read();
-            (*(*tmp).prev).next = self.head;
-            (*self.head).prev = (*tmp).prev;
+            (*(*tmp).prev).next = self.entry;
+            (*self.entry).prev = (*tmp).prev;
             self.allocator.return_node(tmp);
             self.len -= 1;
             val
@@ -274,7 +274,7 @@ impl<T> BiListQueue<T> {
 
     pub fn peek(&self) -> &T {
         assert!(!self.is_empty(), "underflow: peeking at an empty queue");
-        unsafe { (*(*self.head).prev).val.assume_init_ref() }
+        unsafe { (*(*self.entry).prev).val.assume_init_ref() }
     }
 }
 
@@ -283,7 +283,7 @@ impl<T> Drop for BiListQueue<T> {
         while !self.is_empty() {
             self.dequeue();
         }
-        unsafe { self.allocator.return_node(self.head) }
+        unsafe { self.allocator.return_node(self.entry) }
     }
 }
 
