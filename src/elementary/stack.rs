@@ -317,6 +317,113 @@ impl<T> Drop for LinkedChunksStack<T> {
     }
 }
 
+#[derive(Debug)]
+pub struct ShadowCopyStack<T> {
+    base: *mut T,
+    base_size: usize,
+    max_size: usize,
+    copy: *mut T,
+    copy_size: usize,
+}
+
+impl<T> ShadowCopyStack<T> {
+    pub fn new(base_size: usize) -> Self {
+        let base_layout = Layout::array::<T>(base_size).expect("Couldn't create memory layout");
+        let base = unsafe { alloc(base_layout) };
+        if base.is_null() {
+            handle_alloc_error(base_layout);
+        }
+        let base = base as *mut _;
+
+        Self {
+            base,
+            base_size: 0,
+            max_size: base_size,
+            copy: ptr::null_mut(),
+            copy_size: 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.base_size == 0
+    }
+
+    pub fn len(&self) -> usize {
+        self.base_size
+    }
+
+    pub fn push(&mut self, val: T) {
+        unsafe { ptr::write(self.base.add(self.base_size), val) };
+        self.base_size += 1;
+        if !self.copy.is_null() || self.base_size as f32 >= 0.75 * self.max_size as f32 {
+            if self.copy.is_null() {
+                let copy_layout =
+                    Layout::array::<T>(2 * self.max_size).expect("Couldn't create memory layout");
+                let copy = unsafe { alloc(copy_layout) };
+                if copy.is_null() {
+                    handle_alloc_error(copy_layout);
+                }
+                self.copy = copy as *mut _;
+            }
+            let mut additional_copies = 4;
+            while additional_copies > 0 && self.copy_size < self.base_size {
+                unsafe {
+                    self.base
+                        .add(self.copy_size)
+                        .copy_to(self.copy.add(self.copy_size), 1)
+                };
+                self.copy_size += 1;
+                additional_copies -= 1;
+            }
+            // Copy complete
+            if self.copy_size == self.base_size {
+                let base_layout = Layout::array::<T>(self.max_size).unwrap();
+                unsafe { dealloc(self.base as *mut u8, base_layout) };
+                self.base = self.copy;
+                self.max_size *= 2;
+                self.copy = ptr::null_mut();
+                self.copy_size = 0;
+            }
+        }
+    }
+
+    pub fn pop(&mut self) -> T {
+        assert!(!self.is_empty(), "underflow: popping from an empty stack");
+        self.base_size -= 1;
+        let val = unsafe { ptr::read(self.base.add(self.base_size)) };
+        // Copy complete
+        if self.base_size > 0 && self.copy_size == self.base_size {
+            let base_layout = Layout::array::<T>(self.max_size).unwrap();
+            unsafe { dealloc(self.base as *mut u8, base_layout) };
+            self.base = self.copy;
+            self.max_size *= 2;
+            self.copy = ptr::null_mut();
+            self.copy_size = 0;
+        }
+        val
+    }
+
+    pub fn peek(&self) -> &T {
+        assert!(!self.is_empty(), "underflow: peeking at an empty stack");
+        unsafe { &*self.base.add(self.base_size - 1) }
+    }
+}
+
+impl<T> Drop for ShadowCopyStack<T> {
+    fn drop(&mut self) {
+        while !self.is_empty() {
+            self.base_size -= 1;
+            unsafe { ptr::drop_in_place(self.base.add(self.base_size)) };
+        }
+        let base_layout = Layout::array::<T>(self.max_size).unwrap();
+        unsafe { dealloc(self.base as *mut u8, base_layout) };
+        if !self.copy.is_null() {
+            let copy_layout = Layout::array::<T>(2 * self.max_size).unwrap();
+            unsafe { dealloc(self.copy as *mut u8, copy_layout) };
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,6 +578,41 @@ mod tests {
     #[should_panic(expected = "underflow: popping from an empty stack")]
     fn linked_chunks_stack_underflow() {
         let mut stack = LinkedChunksStack::new(4);
+        stack.push(1);
+        stack.pop();
+        assert!(stack.is_empty());
+        stack.pop();
+    }
+
+    #[test]
+    fn shadow_copy_stack_ok() {
+        let mut stack = ShadowCopyStack::new(2);
+        stack.push(3);
+        stack.push(2);
+        stack.push(1);
+        assert_eq!(&1, stack.peek());
+        assert_eq!(3, stack.len());
+        assert_eq!(1, stack.pop());
+
+        stack.pop();
+        stack.pop();
+        assert!(stack.is_empty());
+
+        let range = 4..=9;
+        for i in range.clone() {
+            stack.push(i);
+        }
+        assert_eq!(range.clone().count(), stack.len());
+        for i in range.rev() {
+            assert_eq!(i, stack.pop());
+        }
+        assert!(stack.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "underflow: popping from an empty stack")]
+    fn shadow_copy_stack_underflow() {
+        let mut stack = ShadowCopyStack::new(4);
         stack.push(1);
         stack.pop();
         assert!(stack.is_empty());
