@@ -4,4 +4,5 @@
 extern crate alloc;
 
 pub mod allocator;
-pub mod elementary;
+pub mod queues;
+pub mod stacks;
