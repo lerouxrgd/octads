@@ -9,7 +9,7 @@ use crate::allocator::Nodable;
 pub struct TreeNode<K, V> {
     pub key: MaybeUninit<K>,
     pub right: *mut TreeNode<K, V>,
-    pub left: TreeElem<K, V>,
+    pub left: TreePtr<K, V>,
 }
 
 impl<K, V> Default for TreeNode<K, V> {
@@ -17,7 +17,7 @@ impl<K, V> Default for TreeNode<K, V> {
         Self {
             key: MaybeUninit::uninit(),
             right: ptr::null_mut(),
-            left: TreeElem::Null,
+            left: TreePtr::Null,
         }
     }
 }
@@ -33,28 +33,28 @@ impl<K, V> Nodable for TreeNode<K, V> {
 }
 
 #[derive(Debug, Default)]
-pub enum TreeElem<K, V> {
+pub enum TreePtr<K, V> {
     #[default]
     Null,
     Node(*mut TreeNode<K, V>),
-    Leaf(*mut V), // TODO: rename to Value ?!
+    Val(*mut V),
 }
 
-impl<K, V> Clone for TreeElem<K, V> {
+impl<K, V> Clone for TreePtr<K, V> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<K, V> Copy for TreeElem<K, V> {}
+impl<K, V> Copy for TreePtr<K, V> {}
 
-impl<K, V> TreeElem<K, V> {
+impl<K, V> TreePtr<K, V> {
     pub fn is_null(&self) -> bool {
         matches!(self, Self::Null)
     }
 
-    pub fn is_leaf(&self) -> bool {
-        matches!(self, Self::Leaf(_))
+    pub fn is_val(&self) -> bool {
+        matches!(self, Self::Val(_))
     }
 
     pub fn is_node(&self) -> bool {
@@ -64,21 +64,21 @@ impl<K, V> TreeElem<K, V> {
     pub fn as_node(&self) -> *mut TreeNode<K, V> {
         match *self {
             Self::Node(ptr) => ptr,
-            _ => panic!("tree element is not a node"),
+            _ => panic!("tree pointer is not a node"),
         }
     }
 
-    pub fn as_leaf(&self) -> *mut V {
+    pub fn as_val(&self) -> *mut V {
         match *self {
-            Self::Leaf(ptr) => ptr,
-            _ => panic!("tree element is not a leaf"),
+            Self::Val(ptr) => ptr,
+            _ => panic!("tree pointer is not a value"),
         }
     }
 
-    pub fn as_leaf_mut(&mut self) -> &mut *mut V {
+    pub fn as_val_mut(&mut self) -> &mut *mut V {
         match self {
-            Self::Leaf(ptr) => ptr,
-            _ => panic!("tree element is not a leaf"),
+            Self::Val(ptr) => ptr,
+            _ => panic!("tree pointer is not a value"),
         }
     }
 }
@@ -88,8 +88,8 @@ impl<K, V> TreeNode<K, V> {
         self.left.is_null() && self.right.is_null()
     }
 
-    pub fn has_value(&self) -> bool {
-        self.left.is_leaf() && self.right.is_null()
+    pub fn is_leaf(&self) -> bool {
+        self.left.is_val() && self.right.is_null()
     }
 
     pub fn has_subtrees(&self) -> bool {
@@ -104,7 +104,7 @@ impl<K, V> TreeNode<K, V> {
         unsafe {
             let tmp_node = self.left;
             let tmp_key = self.key.assume_init_read();
-            self.left = TreeElem::Node(self.right);
+            self.left = TreePtr::Node(self.right);
             self.key = MaybeUninit::new((*self.right).key.assume_init_read());
             self.right = (*(self.left).as_node()).right;
             (*(self.left).as_node()).right = (*(self.left).as_node()).left.as_node();
@@ -124,7 +124,7 @@ impl<K, V> TreeNode<K, V> {
             self.right = self.left.as_node();
             self.key = MaybeUninit::new((*self.left.as_node()).key.assume_init_read());
             self.left = (*self.right).left;
-            (*self.right).left = TreeElem::Node((*self.right).right);
+            (*self.right).left = TreePtr::Node((*self.right).right);
             (*self.right).right = tmp_node;
             (*self.right).key = MaybeUninit::new(tmp_key);
         }

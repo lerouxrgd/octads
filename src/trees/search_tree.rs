@@ -4,13 +4,25 @@ use core::ptr;
 
 use crate::allocator::BlockAllocator;
 use crate::stacks::{BoundedStack, LinkedListStack};
-use crate::trees::{TreeElem, TreeNode};
+use crate::trees::{TreeNode, TreePtr};
 
 #[derive(Debug)]
 pub struct SearchTree<K, V> {
     allocator: BlockAllocator<TreeNode<K, V>>,
     root: *mut TreeNode<K, V>,
     length: usize,
+}
+
+impl<K, V> Default for SearchTree<K, V>
+where
+    K: Ord + Clone,
+{
+    fn default() -> Self {
+        Self::new(
+            BlockAllocator::<TreeNode<K, V>>::DEFAULT_BLOCK_SIZE,
+            BlockAllocator::<TreeNode<K, V>>::DEFAULT_BLOCK_CAP,
+        )
+    }
 }
 
 impl<K, V> SearchTree<K, V>
@@ -25,6 +37,10 @@ where
             root,
             length: 0,
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
     }
 
     pub fn len(&self) -> usize {
@@ -47,7 +63,7 @@ where
             }
 
             if key == (*tmp_node).key.assume_init_ref() {
-                Some(&*(*tmp_node).left.as_leaf())
+                Some(&*(*tmp_node).left.as_val())
             } else {
                 None
             }
@@ -58,7 +74,7 @@ where
         self.length += 1;
         unsafe {
             if (*self.root).is_empty() {
-                (*self.root).left = TreeElem::Leaf(Box::into_raw(Box::new(value)));
+                (*self.root).left = TreePtr::Val(Box::into_raw(Box::new(value)));
                 (*self.root).key = MaybeUninit::new(key);
                 return None;
             }
@@ -74,7 +90,7 @@ where
 
             if &key == (*tmp_node).key.assume_init_ref() {
                 let mut val_ptr = Box::into_raw(Box::new(value));
-                mem::swap(&mut val_ptr, (*tmp_node).left.as_leaf_mut());
+                mem::swap(&mut val_ptr, (*tmp_node).left.as_val_mut());
                 return Some(*Box::from_raw(val_ptr));
             }
 
@@ -84,10 +100,10 @@ where
                 (*old_leaf).key = MaybeUninit::new((*tmp_node).key.assume_init_read());
 
                 let new_leaf = self.allocator.get_node();
-                (*new_leaf).left = TreeElem::Leaf(Box::into_raw(Box::new(value)));
+                (*new_leaf).left = TreePtr::Val(Box::into_raw(Box::new(value)));
                 (*new_leaf).key = MaybeUninit::new(key.clone());
 
-                (*tmp_node).left = TreeElem::Node(old_leaf);
+                (*tmp_node).left = TreePtr::Node(old_leaf);
                 (*tmp_node).right = new_leaf;
                 (*tmp_node).key = MaybeUninit::new(key);
             } else {
@@ -96,10 +112,10 @@ where
                 (*old_leaf).key = MaybeUninit::new((*tmp_node).key.assume_init_read().clone());
 
                 let new_leaf = self.allocator.get_node();
-                (*new_leaf).left = TreeElem::Leaf(Box::into_raw(Box::new(value)));
+                (*new_leaf).left = TreePtr::Val(Box::into_raw(Box::new(value)));
                 (*new_leaf).key = MaybeUninit::new(key);
 
-                (*tmp_node).left = TreeElem::Node(new_leaf);
+                (*tmp_node).left = TreePtr::Node(new_leaf);
                 (*tmp_node).right = old_leaf;
             }
             None
@@ -112,10 +128,10 @@ where
                 return None;
             }
 
-            if (*self.root).has_value() {
+            if (*self.root).is_leaf() {
                 if key == (*self.root).key.assume_init_ref() {
                     (*self.root).key.assume_init_drop();
-                    let val_ptr = mem::take(&mut (*self.root).left).as_leaf();
+                    let val_ptr = mem::take(&mut (*self.root).left).as_val();
                     self.length -= 1;
                     return Some(*Box::from_raw(val_ptr));
                 } else {
@@ -145,7 +161,7 @@ where
             (*upper_node).key = MaybeUninit::new((*other_node).key.assume_init_read());
             (*upper_node).left = (*other_node).left;
             (*upper_node).right = (*other_node).right;
-            let val_ptr = mem::take(&mut (*tmp_node).left).as_leaf();
+            let val_ptr = mem::take(&mut (*tmp_node).left).as_val();
             (*tmp_node).key.assume_init_drop();
             self.allocator.return_node(tmp_node);
             self.allocator.return_node(other_node);
@@ -201,7 +217,7 @@ where
         let mut iter = iter.into_iter();
         let length = iter.len();
 
-        let mut allocator: BlockAllocator<TreeNode<K, V>> = BlockAllocator::new(256, 32);
+        let mut allocator: BlockAllocator<TreeNode<K, V>> = BlockAllocator::default();
         let mut stack = BoundedStack::new(length.ilog2() as usize + 1);
 
         // Put root node on stack
@@ -223,15 +239,15 @@ where
                 right.node1 = allocator.get_node();
                 right.node2 = current.node1;
                 right.number = current.number - left.number;
-                unsafe { (*current.node1).left = TreeElem::Node(left.node1) };
+                unsafe { (*current.node1).left = TreePtr::Node(left.node1) };
                 unsafe { (*current.node1).right = right.node1 };
                 stack.push(right);
                 stack.push(left);
-            } else
+            }
             // Reached a leaf, must be filled with list item
-            {
+            else {
                 let (key, value) = iter.next().unwrap();
-                let val_ptr = TreeElem::Leaf(Box::into_raw(Box::new(value)));
+                let val_ptr = TreePtr::Val(Box::into_raw(Box::new(value)));
                 if !current.node2.is_null() {
                     unsafe { (*current.node2).key = MaybeUninit::new(key.clone()) };
                 }
@@ -260,9 +276,9 @@ impl<K, V> Drop for SearchTree<K, V> {
             }
             let mut current_node = self.root;
             while (*current_node).has_subtrees() {
-                if (*(*current_node).left.as_node()).has_value() {
+                if (*(*current_node).left.as_node()).is_leaf() {
                     let leaf_node = (*current_node).left.as_node();
-                    let val_ptr = (*leaf_node).left.as_leaf();
+                    let val_ptr = (*leaf_node).left.as_val();
                     drop(*Box::from_raw(val_ptr));
                     (*leaf_node).key.assume_init_drop();
                     self.allocator.return_node(leaf_node);
@@ -273,13 +289,13 @@ impl<K, V> Drop for SearchTree<K, V> {
                     current_node = tmp;
                 } else {
                     let tmp = (*current_node).left.as_node();
-                    (*current_node).left = TreeElem::Node((*tmp).right);
+                    (*current_node).left = TreePtr::Node((*tmp).right);
                     (*tmp).right = current_node;
                     current_node = tmp;
                 }
             }
             (*current_node).key.assume_init_drop();
-            let val_ptr = (*current_node).left.as_leaf();
+            let val_ptr = (*current_node).left.as_val();
             drop(*Box::from_raw(val_ptr));
         }
     }
@@ -300,8 +316,8 @@ where
         while !self.stack.is_empty() {
             unsafe {
                 let node = self.stack.pop();
-                if (*node).has_value() {
-                    return Some(((*node).key.assume_init_ref(), &*(*node).left.as_leaf()));
+                if (*node).is_leaf() {
+                    return Some(((*node).key.assume_init_ref(), &*(*node).left.as_val()));
                 } else {
                     self.stack.push((*node).left.as_node());
                     self.stack.push((*node).right);
@@ -329,11 +345,11 @@ where
         while !self.stack.is_empty() {
             let node = self.stack.pop();
             unsafe {
-                if (*node).has_value() {
+                if (*node).is_leaf() {
                     if self.min_key <= (*node).key.assume_init_ref()
                         && (*node).key.assume_init_ref() < self.max_key
                     {
-                        return Some(((*node).key.assume_init_ref(), &*(*node).left.as_leaf()));
+                        return Some(((*node).key.assume_init_ref(), &*(*node).left.as_val()));
                     }
                 } else if self.max_key <= (*node).key.assume_init_ref() {
                     self.stack.push((*node).left.as_node());
@@ -355,7 +371,7 @@ mod tests {
 
     #[test]
     fn search_tree_ok() {
-        let mut tree = SearchTree::new(32, 8);
+        let mut tree = SearchTree::default();
         tree.insert(5, 50);
         tree.insert(3, 30);
         tree.insert(1, 10);
@@ -373,7 +389,7 @@ mod tests {
         assert_eq!(4, tree.len());
         assert_eq!(3, tree.find(&1, &5).count());
 
-        tree = SearchTree::new(32, 8);
+        tree = SearchTree::default();
         drop(tree);
 
         let tree = SearchTree::from_iter([(1, 10), (2, 20), (3, 30), (4, 40)]);

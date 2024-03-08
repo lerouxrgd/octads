@@ -21,10 +21,22 @@ where
     free_list: *mut N,
 }
 
+impl<N> Default for BlockAllocator<N>
+where
+    N: Nodable,
+{
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_BLOCK_SIZE, Self::DEFAULT_BLOCK_CAP)
+    }
+}
+
 impl<N> BlockAllocator<N>
 where
     N: Nodable,
 {
+    pub const DEFAULT_BLOCK_SIZE: usize = 256;
+    pub const DEFAULT_BLOCK_CAP: usize = 32;
+
     pub fn new(block_size: usize, blocks_cap: usize) -> Self {
         assert!(block_size > 0, "invalid block size of 0");
         assert!(blocks_cap > 0, "invalid blocks capacity of 0");
