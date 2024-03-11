@@ -147,6 +147,15 @@ pub struct LinkedListStack<T> {
     head: *mut Node<T>,
 }
 
+impl<T> Default for LinkedListStack<T> {
+    fn default() -> Self {
+        Self::new(
+            BlockAllocator::<Node<T>>::DEFAULT_BLOCK_SIZE,
+            BlockAllocator::<Node<T>>::DEFAULT_BLOCK_CAP,
+        )
+    }
+}
+
 impl<T> LinkedListStack<T> {
     pub fn new(block_size: usize, blocks_cap: usize) -> Self {
         Self {
@@ -207,15 +216,15 @@ impl<T> Drop for LinkedListStack<T> {
 }
 
 #[derive(Debug)]
-pub struct LinkedChunksStack<T> {
+pub struct ChunkChainStack<T> {
     base: *mut T,
     top: *mut T,
     chunk_size: usize,
-    previous: *mut LinkedChunksStack<T>,
+    previous: *mut ChunkChainStack<T>,
     len: usize,
 }
 
-impl<T> LinkedChunksStack<T> {
+impl<T> ChunkChainStack<T> {
     pub fn new(chunk_size: usize) -> Self {
         let chunk_layout = Layout::array::<T>(chunk_size).expect("Couldn't create memory layout");
         let base = unsafe { alloc(chunk_layout) };
@@ -244,12 +253,12 @@ impl<T> LinkedChunksStack<T> {
 
     pub fn push(&mut self, val: T) {
         if self.top == unsafe { self.base.add(self.chunk_size) } {
-            let node_layout = Layout::new::<LinkedChunksStack<T>>();
+            let node_layout = Layout::new::<ChunkChainStack<T>>();
             let new_node = unsafe { alloc(node_layout) };
             if new_node.is_null() {
                 handle_alloc_error(node_layout);
             }
-            let new_node = new_node as *mut LinkedChunksStack<T>;
+            let new_node = new_node as *mut ChunkChainStack<T>;
             unsafe {
                 (*new_node).base = self.base;
                 (*new_node).top = self.top;
@@ -286,7 +295,7 @@ impl<T> LinkedChunksStack<T> {
                 self.base = (*old_node).base;
                 self.top = (*old_node).top;
                 self.chunk_size = (*old_node).chunk_size;
-                let node_layout = Layout::new::<LinkedChunksStack<T>>();
+                let node_layout = Layout::new::<ChunkChainStack<T>>();
                 dealloc(old_node as *mut u8, node_layout);
             }
         }
@@ -307,7 +316,7 @@ impl<T> LinkedChunksStack<T> {
     }
 }
 
-impl<T> Drop for LinkedChunksStack<T> {
+impl<T> Drop for ChunkChainStack<T> {
     fn drop(&mut self) {
         while !self.is_empty() {
             self.pop();
@@ -550,8 +559,8 @@ mod tests {
     }
 
     #[test]
-    fn linked_chunks_stack_ok() {
-        let mut stack = LinkedChunksStack::new(2);
+    fn chunk_chain_stack_ok() {
+        let mut stack = ChunkChainStack::new(2);
         stack.push(3);
         stack.push(2);
         stack.push(1);
@@ -576,8 +585,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
-    fn linked_chunks_stack_underflow() {
-        let mut stack = LinkedChunksStack::new(4);
+    fn chunk_chain_stack_underflow() {
+        let mut stack = ChunkChainStack::new(4);
         stack.push(1);
         stack.pop();
         assert!(stack.is_empty());

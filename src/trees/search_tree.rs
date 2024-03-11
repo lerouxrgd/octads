@@ -171,7 +171,7 @@ where
     }
 
     pub fn find<'a, 'b>(&'a self, min_key: &'b K, max_key: &'b K) -> SearchTreeFind<'a, 'b, K, V> {
-        let mut stack = LinkedListStack::new(64, 8);
+        let mut stack = LinkedListStack::default();
         stack.push(self.root);
         SearchTreeFind {
             _tree: self,
@@ -182,7 +182,7 @@ where
     }
 
     pub fn iter(&self) -> SearchTreeIter<'_, K, V> {
-        let mut stack = LinkedListStack::new(64, 8);
+        let mut stack = LinkedListStack::default();
         if unsafe { !(*self.root).is_empty() } {
             stack.push(self.root);
         }

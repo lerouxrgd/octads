@@ -87,6 +87,15 @@ pub struct LinkedListQueue<T> {
     insert: *mut Node<T>,
 }
 
+impl<T> Default for LinkedListQueue<T> {
+    fn default() -> Self {
+        Self::new(
+            BlockAllocator::<Node<T>>::DEFAULT_BLOCK_SIZE,
+            BlockAllocator::<Node<T>>::DEFAULT_BLOCK_CAP,
+        )
+    }
+}
+
 impl<T> LinkedListQueue<T> {
     pub fn new(block_size: usize, blocks_cap: usize) -> Self {
         Self {
@@ -151,13 +160,22 @@ impl<T> Drop for LinkedListQueue<T> {
 }
 
 #[derive(Debug)]
-pub struct CyclicListQueue<T> {
+pub struct CircularLinkedQueue<T> {
     allocator: BlockAllocator<Node<T>>,
     len: usize,
     entry: *mut Node<T>,
 }
 
-impl<T> CyclicListQueue<T> {
+impl<T> Default for CircularLinkedQueue<T> {
+    fn default() -> Self {
+        Self::new(
+            BlockAllocator::<Node<T>>::DEFAULT_BLOCK_SIZE,
+            BlockAllocator::<Node<T>>::DEFAULT_BLOCK_CAP,
+        )
+    }
+}
+
+impl<T> CircularLinkedQueue<T> {
     pub fn new(block_size: usize, blocks_cap: usize) -> Self {
         let mut allocator = BlockAllocator::new(block_size, blocks_cap);
         let entry: *mut Node<_> = allocator.get_node();
@@ -210,7 +228,7 @@ impl<T> CyclicListQueue<T> {
     }
 }
 
-impl<T> Drop for CyclicListQueue<T> {
+impl<T> Drop for CircularLinkedQueue<T> {
     fn drop(&mut self) {
         while !self.is_empty() {
             self.dequeue();
@@ -220,13 +238,22 @@ impl<T> Drop for CyclicListQueue<T> {
 }
 
 #[derive(Debug)]
-pub struct BiListQueue<T> {
+pub struct DoubleLinkedQueue<T> {
     allocator: BlockAllocator<BiNode<T>>,
     len: usize,
     entry: *mut BiNode<T>,
 }
 
-impl<T> BiListQueue<T> {
+impl<T> Default for DoubleLinkedQueue<T> {
+    fn default() -> Self {
+        Self::new(
+            BlockAllocator::<Node<T>>::DEFAULT_BLOCK_SIZE,
+            BlockAllocator::<Node<T>>::DEFAULT_BLOCK_CAP,
+        )
+    }
+}
+
+impl<T> DoubleLinkedQueue<T> {
     pub fn new(block_size: usize, blocks_cap: usize) -> Self {
         let mut allocator = BlockAllocator::new(block_size, blocks_cap);
         let entry: *mut BiNode<_> = allocator.get_node();
@@ -278,7 +305,7 @@ impl<T> BiListQueue<T> {
     }
 }
 
-impl<T> Drop for BiListQueue<T> {
+impl<T> Drop for DoubleLinkedQueue<T> {
     fn drop(&mut self) {
         while !self.is_empty() {
             self.dequeue();
@@ -372,8 +399,8 @@ mod tests {
     }
 
     #[test]
-    fn cyclic_list_queue_ok() {
-        let mut q = CyclicListQueue::new(2, 1);
+    fn circular_linked_queue_ok() {
+        let mut q = CircularLinkedQueue::new(2, 1);
         q.enqueue(3);
         q.enqueue(2);
         q.enqueue(1);
@@ -399,8 +426,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: dequeuing from an empty queue")]
-    fn cyclic_list_queue_underflow() {
-        let mut q = CyclicListQueue::new(4, 2);
+    fn circular_linked_queue_underflow() {
+        let mut q = CircularLinkedQueue::new(4, 2);
         q.enqueue(1);
         q.dequeue();
         assert!(q.is_empty());
@@ -408,8 +435,8 @@ mod tests {
     }
 
     #[test]
-    fn bi_list_queue_ok() {
-        let mut q = BiListQueue::new(2, 1);
+    fn double_linked_queue_ok() {
+        let mut q = DoubleLinkedQueue::new(2, 1);
         q.enqueue(3);
         q.enqueue(2);
         q.enqueue(1);
@@ -435,8 +462,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: dequeuing from an empty queue")]
-    fn bi_list_queue_underflow() {
-        let mut q = BiListQueue::new(4, 2);
+    fn double_linked_queue_underflow() {
+        let mut q = DoubleLinkedQueue::new(4, 2);
         q.enqueue(1);
         q.dequeue();
         assert!(q.is_empty());
