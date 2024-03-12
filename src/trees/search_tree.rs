@@ -1,5 +1,7 @@
 use alloc::boxed::Box;
+use core::borrow::Borrow;
 use core::mem::{self, MaybeUninit};
+use core::ops::Range;
 use core::ptr;
 
 use crate::allocator::BlockAllocator;
@@ -170,14 +172,16 @@ where
         }
     }
 
-    pub fn find<'a, 'b>(&'a self, min_key: &'b K, max_key: &'b K) -> SearchTreeFind<'a, 'b, K, V> {
+    pub fn find<'a, Q>(&'a self, range: Range<Q>) -> SearchTreeFind<'a, K, V, Q>
+    where
+        Q: Borrow<K>,
+    {
         let mut stack = LinkedListStack::default();
         stack.push(self.root);
         SearchTreeFind {
             _tree: self,
             stack,
-            min_key,
-            max_key,
+            range,
         }
     }
 
@@ -379,15 +383,15 @@ where
 
 impl<'a, K, V> core::iter::FusedIterator for SearchTreeIter<'a, K, V> where K: Ord {}
 
-pub struct SearchTreeFind<'a, 'b, K, V> {
+pub struct SearchTreeFind<'a, K, V, Q> {
     _tree: &'a SearchTree<K, V>,
     stack: LinkedListStack<*mut TreeNode<K, V>>,
-    min_key: &'b K,
-    max_key: &'b K,
+    range: Range<Q>,
 }
 
-impl<'a, 'b, K, V> Iterator for SearchTreeFind<'a, 'b, K, V>
+impl<'a, K, V, Q> Iterator for SearchTreeFind<'a, K, V, Q>
 where
+    Q: Borrow<K>,
     K: Ord,
 {
     type Item = (&'a K, &'a V);
@@ -396,19 +400,18 @@ where
         while !self.stack.is_empty() {
             let node = self.stack.pop();
             unsafe {
+                let node_key = (*node).key.assume_init_ref().borrow();
                 if (*node).is_leaf() {
-                    if self.min_key <= (*node).key.assume_init_ref()
-                        && (*node).key.assume_init_ref() < self.max_key
-                    {
-                        return Some(((*node).key.assume_init_ref(), &*(*node).left.as_val()));
+                    if self.range.start.borrow() <= node_key && node_key < self.range.end.borrow() {
+                        return Some((node_key, &*(*node).left.as_val()));
                     }
-                } else if self.max_key <= (*node).key.assume_init_ref() {
+                } else if self.range.end.borrow() <= node_key {
                     self.stack.push((*node).left.as_node());
-                } else if (*node).key.assume_init_ref() <= self.min_key {
+                } else if node_key <= self.range.start.borrow() {
                     self.stack.push((*node).right);
                 } else {
-                    self.stack.push((*node).left.as_node());
                     self.stack.push((*node).right);
+                    self.stack.push((*node).left.as_node());
                 }
             }
         }
@@ -430,12 +433,12 @@ mod tests {
         tree.insert(4, 40);
         assert_eq!(Some(&20), tree.get(&2));
         assert_eq!(5, tree.len());
-        assert_eq!(4, tree.find(&1, &5).count());
+        assert_eq!(4, tree.find(1..5).count());
         assert_eq!(Some(30), tree.remove(&3));
         assert_eq!(None, tree.remove(&3));
         assert_eq!(None, tree.get(&3));
         assert_eq!(4, tree.len());
-        assert_eq!(3, tree.find(&1, &5).count());
+        assert_eq!(3, tree.find(1..5).count());
 
         tree = SearchTree::default();
         drop(tree);
@@ -443,7 +446,7 @@ mod tests {
         let tree = SearchTree::from_sorted([(1, 10), (2, 20), (3, 30), (4, 40)]);
         assert_eq!(Some(&30), tree.get(&3));
         assert_eq!(4, tree.len());
-        assert_eq!(3, tree.find(&2, &5).count());
+        assert_eq!(3, tree.find(2..5).count());
     }
 
     #[test]
@@ -465,9 +468,41 @@ mod tests {
         assert_eq!(None, iter.next());
         assert_eq!(None, iter.next_back());
         assert_eq!(None, iter.next());
+    }
 
-        for ((&k, &v), i) in tree.find(&2, &5).zip((2..5).rev()) {
+    #[test]
+    fn search_tree_find() {
+        let tree = SearchTree::from_sorted([(1, 10), (2, 20), (3, 30), (4, 40)]);
+        for ((&k, &v), i) in tree.find(2..5).zip(2..5) {
             assert_eq!((k, v), (i, i * 10));
         }
+        assert_eq!(3, tree.find(2..5).count());
+
+        use alloc::string::ToString;
+        let tree = SearchTree::from_sorted([
+            ("1".to_string(), 10),
+            ("2".to_string(), 20),
+            ("3".to_string(), 30),
+            ("4".to_string(), 40),
+        ]);
+        let start = "2".to_string();
+        let end = "5".to_string();
+        for ((k, &v), i) in tree.find(&start..&end).zip(2..5) {
+            assert_eq!((k.as_str(), v), (i.to_string().as_str(), i * 10));
+        }
+        assert_eq!(3, tree.find(&start..&end).count());
+        assert_eq!(3, tree.find(start..end).count());
+
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+        struct Int(usize);
+        let tree =
+            SearchTree::from_sorted([(Int(1), 10), (Int(2), 20), (Int(3), 30), (Int(4), 40)]);
+        let start = Int(2);
+        let end = Int(5);
+        for ((k, &v), i) in tree.find(&start..&end).zip(2..5) {
+            assert_eq!((k, v), (&Int(i), i * 10));
+        }
+        assert_eq!(3, tree.find(&start..&end).count());
+        assert_eq!(3, tree.find(start..end).count());
     }
 }
