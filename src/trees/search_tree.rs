@@ -182,11 +182,19 @@ where
     }
 
     pub fn iter(&self) -> SearchTreeIter<'_, K, V> {
-        let mut stack = LinkedListStack::default();
+        let mut iter_stack = LinkedListStack::default();
+        let mut rev_stack = LinkedListStack::default();
         if unsafe { !(*self.root).is_empty() } {
-            stack.push(self.root);
+            iter_stack.push(self.root);
+            rev_stack.push(self.root);
         }
-        SearchTreeIter { _tree: self, stack }
+        SearchTreeIter {
+            _tree: self,
+            iter_stack,
+            rev_stack,
+            last_iter_key: None,
+            last_rev_key: None,
+        }
     }
 
     /// Top-down contruction of an optimal SearchTree.
@@ -303,7 +311,10 @@ impl<K, V> Drop for SearchTree<K, V> {
 
 pub struct SearchTreeIter<'a, K, V> {
     _tree: &'a SearchTree<K, V>,
-    stack: LinkedListStack<*mut TreeNode<K, V>>,
+    iter_stack: LinkedListStack<*mut TreeNode<K, V>>,
+    rev_stack: LinkedListStack<*mut TreeNode<K, V>>,
+    last_iter_key: Option<&'a K>,
+    last_rev_key: Option<&'a K>,
 }
 
 impl<'a, K, V> Iterator for SearchTreeIter<'a, K, V>
@@ -313,20 +324,60 @@ where
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while !self.stack.is_empty() {
+        while !self.iter_stack.is_empty() {
             unsafe {
-                let node = self.stack.pop();
+                let node = self.iter_stack.pop();
                 if (*node).is_leaf() {
-                    return Some(((*node).key.assume_init_ref(), &*(*node).left.as_val()));
+                    let node_key = (*node).key.assume_init_ref();
+                    match self.last_rev_key {
+                        Some(last_rev_key) if last_rev_key <= node_key => {
+                            return None;
+                        }
+                        _ => {
+                            self.last_iter_key = Some(node_key);
+                            return Some((node_key, &*(*node).left.as_val()));
+                        }
+                    }
                 } else {
-                    self.stack.push((*node).left.as_node());
-                    self.stack.push((*node).right);
+                    self.iter_stack.push((*node).right);
+                    self.iter_stack.push((*node).left.as_node());
                 }
             }
         }
         None
     }
 }
+
+impl<'a, K, V> DoubleEndedIterator for SearchTreeIter<'a, K, V>
+where
+    K: Ord,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        while !self.rev_stack.is_empty() {
+            unsafe {
+                let node = self.rev_stack.pop();
+                if (*node).is_leaf() {
+                    let node_key = (*node).key.assume_init_ref();
+                    match self.last_iter_key {
+                        Some(last_iter_key) if last_iter_key >= node_key => {
+                            return None;
+                        }
+                        _ => {
+                            self.last_rev_key = Some(node_key);
+                            return Some((node_key, &*(*node).left.as_val()));
+                        }
+                    }
+                } else {
+                    self.rev_stack.push((*node).left.as_node());
+                    self.rev_stack.push((*node).right);
+                }
+            }
+        }
+        None
+    }
+}
+
+impl<'a, K, V> core::iter::FusedIterator for SearchTreeIter<'a, K, V> where K: Ord {}
 
 pub struct SearchTreeFind<'a, 'b, K, V> {
     _tree: &'a SearchTree<K, V>,
@@ -380,9 +431,6 @@ mod tests {
         assert_eq!(Some(&20), tree.get(&2));
         assert_eq!(5, tree.len());
         assert_eq!(4, tree.find(&1, &5).count());
-        for ((&k, &v), i) in tree.find(&1, &5).zip((1..5).rev()) {
-            assert_eq!((k, v), (i, i * 10));
-        }
         assert_eq!(Some(30), tree.remove(&3));
         assert_eq!(None, tree.remove(&3));
         assert_eq!(None, tree.get(&3));
@@ -396,7 +444,29 @@ mod tests {
         assert_eq!(Some(&30), tree.get(&3));
         assert_eq!(4, tree.len());
         assert_eq!(3, tree.find(&2, &5).count());
-        for ((&k, &v), i) in tree.iter().zip((1..5).rev()) {
+    }
+
+    #[test]
+    fn search_tree_iter() {
+        let tree = SearchTree::from_iter([(1, 10), (2, 20), (3, 30), (4, 40)]);
+
+        for ((&k, &v), i) in tree.iter().zip(1..5) {
+            assert_eq!((k, v), (i, i * 10));
+        }
+        for ((&k, &v), i) in tree.iter().rev().zip((1..5).rev()) {
+            assert_eq!((k, v), (i, i * 10));
+        }
+        let mut iter = tree.iter();
+        assert_eq!(Some((&1, &10)), iter.next());
+        assert_eq!(Some((&2, &20)), iter.next());
+        assert_eq!(Some((&4, &40)), iter.next_back());
+        assert_eq!(Some((&3, &30)), iter.next_back());
+        assert_eq!(None, iter.next_back());
+        assert_eq!(None, iter.next());
+        assert_eq!(None, iter.next_back());
+        assert_eq!(None, iter.next());
+
+        for ((&k, &v), i) in tree.find(&2, &5).zip((2..5).rev()) {
             assert_eq!((k, v), (i, i * 10));
         }
     }
