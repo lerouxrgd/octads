@@ -197,9 +197,9 @@ where
         }
     }
 
-    /// Top-down contruction of an optimal SearchTree.
-    /// It is assumed that `iter` is sorted (by K).
-    pub fn from_iter<I>(iter: I) -> Self
+    /// Top-down contruction of an optimal `SearchTree`.
+    /// It is assumed that `iter` is sorted (by `K`).
+    pub fn from_sorted<I>(iter: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
         I::IntoIter: ExactSizeIterator,
@@ -440,7 +440,7 @@ mod tests {
         tree = SearchTree::default();
         drop(tree);
 
-        let tree = SearchTree::from_iter([(1, 10), (2, 20), (3, 30), (4, 40)]);
+        let tree = SearchTree::from_sorted([(1, 10), (2, 20), (3, 30), (4, 40)]);
         assert_eq!(Some(&30), tree.get(&3));
         assert_eq!(4, tree.len());
         assert_eq!(3, tree.find(&2, &5).count());
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn search_tree_iter() {
-        let tree = SearchTree::from_iter([(1, 10), (2, 20), (3, 30), (4, 40)]);
+        let tree = SearchTree::from_sorted([(1, 10), (2, 20), (3, 30), (4, 40)]);
 
         for ((&k, &v), i) in tree.iter().zip(1..5) {
             assert_eq!((k, v), (i, i * 10));
