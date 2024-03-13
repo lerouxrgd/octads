@@ -172,7 +172,7 @@ where
         }
     }
 
-    pub fn find<'a, Q>(&'a self, range: Range<Q>) -> SearchTreeFind<'a, K, V, Q>
+    pub fn find<Q>(&self, range: Range<Q>) -> SearchTreeFind<'_, K, V, Q>
     where
         Q: Borrow<K>,
     {
@@ -202,7 +202,10 @@ where
     }
 
     /// Top-down contruction of an optimal `SearchTree`.
-    /// It is assumed that `iter` is sorted (by `K`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `iter` is not sorted (by `K`) or if it contains duplicates.
     pub fn from_sorted<I>(iter: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -238,6 +241,8 @@ where
         current.number = length; // root expands to length leaves
         stack.push(current);
 
+        let mut prev_key = None;
+        let mut is_valid = true;
         while !stack.is_empty()
         // There is still unexpanded nodes
         {
@@ -267,14 +272,27 @@ where
                     (*current.node1).left = val_ptr;
                     (*current.node1).key = MaybeUninit::new(key);
                     (*current.node1).right = ptr::null_mut();
+                    // Check whether iter is valid
+                    let key = (*current.node1).key.assume_init_ref();
+                    if let Some(prev_key) = prev_key.take() {
+                        if prev_key >= key {
+                            is_valid = false;
+                        }
+                    }
+                    prev_key = Some(key);
                 }
             }
         }
 
-        Self {
+        let tree = Self {
             allocator,
             root,
             length,
+        };
+        if !is_valid {
+            panic!("iterator keys are not sorted or unique");
+        } else {
+            tree
         }
     }
 }
@@ -447,6 +465,12 @@ mod tests {
         assert_eq!(Some(&30), tree.get(&3));
         assert_eq!(4, tree.len());
         assert_eq!(3, tree.find(2..5).count());
+    }
+
+    #[test]
+    #[should_panic(expected = "iterator keys are not sorted or unique")]
+    fn search_tree_unsorted() {
+        let _tree = SearchTree::from_sorted([(3, 30), (1, 10), (4, 40), (2, 20)]);
     }
 
     #[test]
