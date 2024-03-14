@@ -1,5 +1,6 @@
 use alloc::boxed::Box;
 use core::borrow::Borrow;
+use core::iter::FusedIterator;
 use core::mem::{self, MaybeUninit};
 use core::ops::Range;
 use core::ptr;
@@ -176,11 +177,16 @@ where
     where
         Q: Borrow<K>,
     {
-        let mut stack = LinkedListStack::default();
-        stack.push(self.root);
+        let mut iter_stack = LinkedListStack::default();
+        let mut rev_stack = LinkedListStack::default();
+        iter_stack.push(self.root);
+        rev_stack.push(self.root);
         SearchTreeFind {
             _tree: self,
-            stack,
+            iter_stack,
+            rev_stack,
+            last_iter_key: None,
+            last_rev_key: None,
             range,
         }
     }
@@ -399,11 +405,14 @@ where
     }
 }
 
-impl<'a, K, V> core::iter::FusedIterator for SearchTreeIter<'a, K, V> where K: Ord {}
+impl<'a, K, V> FusedIterator for SearchTreeIter<'a, K, V> where K: Ord {}
 
 pub struct SearchTreeFind<'a, K, V, Q> {
     _tree: &'a SearchTree<K, V>,
-    stack: LinkedListStack<*mut TreeNode<K, V>>,
+    iter_stack: LinkedListStack<*mut TreeNode<K, V>>,
+    rev_stack: LinkedListStack<*mut TreeNode<K, V>>,
+    last_iter_key: Option<&'a K>,
+    last_rev_key: Option<&'a K>,
     range: Range<Q>,
 }
 
@@ -415,26 +424,77 @@ where
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while !self.stack.is_empty() {
-            let node = self.stack.pop();
+        while !self.iter_stack.is_empty() {
+            let node = self.iter_stack.pop();
             unsafe {
                 let node_key = (*node).key.assume_init_ref().borrow();
                 if (*node).is_leaf() {
                     if self.range.start.borrow() <= node_key && node_key < self.range.end.borrow() {
-                        return Some((node_key, &*(*node).left.as_val()));
+                        match self.last_rev_key {
+                            Some(last_rev_key) if last_rev_key <= node_key => {
+                                return None;
+                            }
+                            _ => {
+                                self.last_iter_key = Some(node_key);
+                                return Some((node_key, &*(*node).left.as_val()));
+                            }
+                        }
                     }
                 } else if self.range.end.borrow() <= node_key {
-                    self.stack.push((*node).left.as_node());
+                    self.iter_stack.push((*node).left.as_node());
                 } else if node_key <= self.range.start.borrow() {
-                    self.stack.push((*node).right);
+                    self.iter_stack.push((*node).right);
                 } else {
-                    self.stack.push((*node).right);
-                    self.stack.push((*node).left.as_node());
+                    self.iter_stack.push((*node).right);
+                    self.iter_stack.push((*node).left.as_node());
                 }
             }
         }
         None
     }
+}
+
+impl<'a, K, V, Q> DoubleEndedIterator for SearchTreeFind<'a, K, V, Q>
+where
+    Q: Borrow<K>,
+    K: Ord,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        while !self.rev_stack.is_empty() {
+            let node = self.rev_stack.pop();
+            unsafe {
+                let node_key = (*node).key.assume_init_ref().borrow();
+                if (*node).is_leaf() {
+                    if self.range.start.borrow() <= node_key && node_key < self.range.end.borrow() {
+                        match self.last_iter_key {
+                            Some(last_iter_key) if last_iter_key >= node_key => {
+                                return None;
+                            }
+                            _ => {
+                                self.last_rev_key = Some(node_key);
+                                return Some((node_key, &*(*node).left.as_val()));
+                            }
+                        }
+                    }
+                } else if self.range.end.borrow() <= node_key {
+                    self.rev_stack.push((*node).left.as_node());
+                } else if node_key <= self.range.start.borrow() {
+                    self.rev_stack.push((*node).right);
+                } else {
+                    self.rev_stack.push((*node).left.as_node());
+                    self.rev_stack.push((*node).right);
+                }
+            }
+        }
+        None
+    }
+}
+
+impl<'a, K, V, Q> FusedIterator for SearchTreeFind<'a, K, V, Q>
+where
+    Q: Borrow<K>,
+    K: Ord,
+{
 }
 
 #[cfg(test)]
@@ -501,6 +561,17 @@ mod tests {
             assert_eq!((k, v), (i, i * 10));
         }
         assert_eq!(3, tree.find(2..5).count());
+
+        let tree = SearchTree::from_sorted([(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
+        let mut iter = tree.find(2..6);
+        assert_eq!(Some((&2, &20)), iter.next());
+        assert_eq!(Some((&3, &30)), iter.next());
+        assert_eq!(Some((&5, &50)), iter.next_back());
+        assert_eq!(Some((&4, &40)), iter.next_back());
+        assert_eq!(None, iter.next_back());
+        assert_eq!(None, iter.next());
+        assert_eq!(None, iter.next_back());
+        assert_eq!(None, iter.next());
 
         use alloc::string::ToString;
         let tree = SearchTree::from_sorted([
