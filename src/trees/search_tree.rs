@@ -338,6 +338,19 @@ impl<K, V> Drop for SearchTree<K, V> {
     }
 }
 
+impl<K, V> FromIterator<(K, V)> for SearchTree<K, V>
+where
+    K: Ord + Clone,
+{
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
+        let mut tree = Self::default();
+        for (k, v) in iter {
+            tree.insert(k, v);
+        }
+        tree
+    }
+}
+
 pub struct SearchTreeIter<'a, K, V> {
     _tree: &'a SearchTree<K, V>,
     iter_stack: LinkedListStack<*mut TreeNode<K, V>>,
@@ -514,7 +527,10 @@ where
     }
 }
 
-pub struct SearchTreeIntoIter<K, V> {
+pub struct SearchTreeIntoIter<K, V>
+where
+    K: Ord,
+{
     current_node: *mut TreeNode<K, V>,
     tree: ManuallyDrop<SearchTree<K, V>>,
 }
@@ -561,14 +577,14 @@ where
     }
 }
 
-impl<K, V> Drop for SearchTreeIntoIter<K, V> {
+impl<K, V> Drop for SearchTreeIntoIter<K, V>
+where
+    K: Ord,
+{
     fn drop(&mut self) {
         unsafe {
-            if self.current_node.is_null() {
-                ptr::drop_in_place(&mut self.tree.allocator as *mut _);
-            } else {
-                ManuallyDrop::drop(&mut self.tree);
-            }
+            while self.next().is_some() {}
+            ptr::drop_in_place(&mut self.tree.allocator as *mut _);
         }
     }
 }
@@ -634,10 +650,17 @@ mod tests {
         for ((k, v), i) in tree.into_iter().zip(1..5) {
             assert_eq!((k, v), (i, i * 10));
         }
+
+        let tree = SearchTree::from_iter([(1, 10), (2, 20), (3, 30), (4, 40)]);
+        let mut iter = tree.into_iter();
+        assert_eq!(Some((1, 10)), iter.next());
+        drop(iter);
+
         let tree = SearchTree::from_sorted([(1, 10), (2, 20), (3, 30), (4, 40)]);
         let mut iter = tree.into_iter();
         assert_eq!(Some((1, 10)), iter.next());
         drop(iter);
+
         let tree: SearchTree<usize, usize> = SearchTree::default();
         let iter = tree.into_iter();
         drop(iter);
