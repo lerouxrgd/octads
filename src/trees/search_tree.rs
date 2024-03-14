@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::borrow::Borrow;
 use core::iter::FusedIterator;
-use core::mem::{self, MaybeUninit};
+use core::mem::{self, ManuallyDrop, MaybeUninit};
 use core::ops::Range;
 use core::ptr;
 
@@ -330,9 +330,10 @@ impl<K, V> Drop for SearchTree<K, V> {
                     current_node = tmp;
                 }
             }
-            (*current_node).key.assume_init_drop();
             let val_ptr = (*current_node).left.as_val();
             drop(*Box::from_raw(val_ptr));
+            (*current_node).key.assume_init_drop();
+            self.allocator.return_node(current_node);
         }
     }
 }
@@ -497,6 +498,81 @@ where
 {
 }
 
+impl<K, V> IntoIterator for SearchTree<K, V>
+where
+    K: Ord,
+{
+    type Item = (K, V);
+    type IntoIter = SearchTreeIntoIter<K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let tree = ManuallyDrop::new(self);
+        SearchTreeIntoIter {
+            current_node: tree.root,
+            tree,
+        }
+    }
+}
+
+pub struct SearchTreeIntoIter<K, V> {
+    current_node: *mut TreeNode<K, V>,
+    tree: ManuallyDrop<SearchTree<K, V>>,
+}
+
+impl<K, V> Iterator for SearchTreeIntoIter<K, V>
+where
+    K: Ord,
+{
+    type Item = (K, V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unsafe {
+            if self.current_node.is_null() || (*self.current_node).is_empty() {
+                return None;
+            }
+            while (*self.current_node).has_subtrees() {
+                if (*(*self.current_node).left.as_node()).is_leaf() {
+                    let leaf_node = (*self.current_node).left.as_node();
+                    let val_ptr = (*leaf_node).left.as_val();
+                    let val = *Box::from_raw(val_ptr);
+                    let key = (*leaf_node).key.assume_init_read();
+                    self.tree.allocator.return_node(leaf_node);
+
+                    let tmp = (*self.current_node).right;
+                    (*self.current_node).key.assume_init_drop();
+                    self.tree.allocator.return_node(self.current_node);
+                    self.current_node = tmp;
+
+                    return Some((key, val));
+                } else {
+                    let tmp = (*self.current_node).left.as_node();
+                    (*self.current_node).left = TreePtr::Node((*tmp).right);
+                    (*tmp).right = self.current_node;
+                    self.current_node = tmp;
+                }
+            }
+            let val_ptr = (*self.current_node).left.as_val();
+            let val = *Box::from_raw(val_ptr);
+            let key = (*self.current_node).key.assume_init_read();
+            self.tree.allocator.return_node(self.current_node);
+            self.current_node = ptr::null_mut();
+            Some((key, val))
+        }
+    }
+}
+
+impl<K, V> Drop for SearchTreeIntoIter<K, V> {
+    fn drop(&mut self) {
+        unsafe {
+            if self.current_node.is_null() {
+                ptr::drop_in_place(&mut self.tree.allocator as *mut _);
+            } else {
+                ManuallyDrop::drop(&mut self.tree);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,9 +616,11 @@ mod tests {
         for ((&k, &v), i) in tree.iter().zip(1..5) {
             assert_eq!((k, v), (i, i * 10));
         }
+
         for ((&k, &v), i) in tree.iter().rev().zip((1..5).rev()) {
             assert_eq!((k, v), (i, i * 10));
         }
+
         let mut iter = tree.iter();
         assert_eq!(Some((&1, &10)), iter.next());
         assert_eq!(Some((&2, &20)), iter.next());
@@ -552,6 +630,17 @@ mod tests {
         assert_eq!(None, iter.next());
         assert_eq!(None, iter.next_back());
         assert_eq!(None, iter.next());
+
+        for ((k, v), i) in tree.into_iter().zip(1..5) {
+            assert_eq!((k, v), (i, i * 10));
+        }
+        let tree = SearchTree::from_sorted([(1, 10), (2, 20), (3, 30), (4, 40)]);
+        let mut iter = tree.into_iter();
+        assert_eq!(Some((1, 10)), iter.next());
+        drop(iter);
+        let tree: SearchTree<usize, usize> = SearchTree::default();
+        let iter = tree.into_iter();
+        drop(iter);
     }
 
     #[test]
