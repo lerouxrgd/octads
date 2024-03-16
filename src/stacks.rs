@@ -216,15 +216,15 @@ impl<T> Drop for LinkedListStack<T> {
 }
 
 #[derive(Debug)]
-pub struct ChunkChainStack<T> {
+pub struct UnboundedStack<T> {
     base: *mut T,
     top: *mut T,
     chunk_size: usize,
-    previous: *mut ChunkChainStack<T>,
+    previous: *mut UnboundedStack<T>,
     len: usize,
 }
 
-impl<T> ChunkChainStack<T> {
+impl<T> UnboundedStack<T> {
     pub fn new(chunk_size: usize) -> Self {
         let chunk_layout = Layout::array::<T>(chunk_size).expect("Couldn't create memory layout");
         let base = unsafe { alloc(chunk_layout) };
@@ -253,12 +253,12 @@ impl<T> ChunkChainStack<T> {
 
     pub fn push(&mut self, val: T) {
         if self.top == unsafe { self.base.add(self.chunk_size) } {
-            let node_layout = Layout::new::<ChunkChainStack<T>>();
+            let node_layout = Layout::new::<UnboundedStack<T>>();
             let new_node = unsafe { alloc(node_layout) };
             if new_node.is_null() {
                 handle_alloc_error(node_layout);
             }
-            let new_node = new_node as *mut ChunkChainStack<T>;
+            let new_node = new_node as *mut UnboundedStack<T>;
             unsafe {
                 (*new_node).base = self.base;
                 (*new_node).top = self.top;
@@ -295,7 +295,7 @@ impl<T> ChunkChainStack<T> {
                 self.base = (*old_node).base;
                 self.top = (*old_node).top;
                 self.chunk_size = (*old_node).chunk_size;
-                let node_layout = Layout::new::<ChunkChainStack<T>>();
+                let node_layout = Layout::new::<UnboundedStack<T>>();
                 dealloc(old_node as *mut u8, node_layout);
             }
         }
@@ -316,7 +316,7 @@ impl<T> ChunkChainStack<T> {
     }
 }
 
-impl<T> Drop for ChunkChainStack<T> {
+impl<T> Drop for UnboundedStack<T> {
     fn drop(&mut self) {
         while !self.is_empty() {
             self.pop();
@@ -559,8 +559,8 @@ mod tests {
     }
 
     #[test]
-    fn chunk_chain_stack_ok() {
-        let mut stack = ChunkChainStack::new(2);
+    fn unbounded_stack_ok() {
+        let mut stack = UnboundedStack::new(2);
         stack.push(3);
         stack.push(2);
         stack.push(1);
@@ -585,8 +585,8 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "underflow: popping from an empty stack")]
-    fn chunk_chain_stack_underflow() {
-        let mut stack = ChunkChainStack::new(4);
+    fn unbounded_stack_underflow() {
+        let mut stack = UnboundedStack::new(4);
         stack.push(1);
         stack.pop();
         assert!(stack.is_empty());
