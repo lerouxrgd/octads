@@ -207,7 +207,7 @@ where
         }
     }
 
-    /// Top-down contruction of an optimal `SearchTree`.
+    /// Top-down contruction of an optimal [`SearchTree`]().
     ///
     /// # Panics
     ///
