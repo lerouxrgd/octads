@@ -29,7 +29,7 @@ Queue implementations: [BoundedQueue][], [LinkedListQueue][], [CircularLinkedQue
 
 #### Trees
 
-Tree implementations: [SearchTree][]
+Tree implementations: [SearchTree][], [HeightBalancedTree][]
 
 [ads]: https://www.cambridge.org/core/books/advanced-data-structures/D56E2269D7CEE969A3B8105AD5B9254C
 [brass]: http://www-cs.engr.ccny.cuny.edu/~peter/
@@ -59,3 +59,4 @@ Tree implementations: [SearchTree][]
 [doublelinkedqueue]: https://lerouxrgd.github.io/octads/octads/queues/struct.DoubleLinkedQueue.html
 
 [searchtree]: https://lerouxrgd.github.io/octads/octads/trees/search_tree/struct.SearchTree.html
+[heightbalancedtree]: https://lerouxrgd.github.io/octads/octads/trees/height_balanced_tree/struct.HeightBalancedTree.html

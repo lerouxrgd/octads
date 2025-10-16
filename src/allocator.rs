@@ -1,4 +1,4 @@
-use alloc::alloc::{alloc, dealloc, handle_alloc_error, realloc, Layout};
+use alloc::alloc::{Layout, alloc, dealloc, handle_alloc_error, realloc};
 use core::mem::MaybeUninit;
 use core::ptr;
 
